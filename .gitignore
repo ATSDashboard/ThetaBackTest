@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+data/parquet/
+data/manifest.parquet
+results/ingestion_live.log
+results/ingestion_rejects.csv
+results/phase1_discovery.json
+*.pyc
+.DS_Store
