@@ -1,0 +1,15 @@
+# Findings Log
+
+Append-only log of every backtest analysis. One line per run. Read this before
+proposing new analyses so insights compound instead of being re-derived.
+
+Format: `date · analysis_id · rule · period · days · win% · net_pnl · one-line insight`
+
+---
+
+- 2026-04-22 · 001 · NIFTY non-expiry intraday short strangle ~3% OTM, 09:30–10:30 entry, 15:00 exit, 1 lot/leg · 2025-04-21→2026-04-17 · 151 days · 64.9% wins · ₹−6,009 net · High win-rate masks fat left tail — worst day (−₹10.8K) wiped ~3 months of winners; raw strategy barely breaks even before ₹75K/yr friction.
+- 2026-04-22 · 002 · NIFTY non-expiry rule sweep (8 variants · SL/PT/skip-filters + distance + time sweeps, friction ₹200/leg) · 151 days train/test 106/45 · Best = V5 gap-filter (skip |gap|>0.5%): train 19% wins −₹17K net · All variants net-negative; friction (~₹400/day) eats thin 3%-OTM decay. No SL/PT combo solved the tail; filters reduced loss by cutting trades in half, not by winning more.
+- 2026-04-22 · 003 · 10:00 entry, 3%/4%/5% OTM, exit at ₹2 combined decay or 15:15, with/without ₹6 stop, DTE slabs · 151 days · Target hit often at 3% (86/151 days, 57%) but ₹2×65 = ₹130 gross/hit vs ₹400 friction/day → every (distance×variant×DTE) net-negative. 4%/5% rarely even hit gross target. Headline: **the strategy as specified cannot clear friction — needs ₹5+ target or sub-₹50/leg cost assumption.**
+- 2026-04-22 · 004 · NIFTY E-1 (DTE=1) deep OTM premium survey, 10:00 entry, distances 1-5% · 46 E-1 days (28 Mon, 17 Wed, 1 Tue) · Median entry premium (combined CE+PE): 1%=₹74, 1.5%=₹31, 2%=₹13, 2.5%=₹7.5, 3%=₹4.9, 4%=₹3.3, 5%=₹2.4 · % expire worthless: ≥2.5% = 100%, 2% = 95.7%, 1.5% = 76%, 1% = 37% · **Verdict: at single distance, Rohan's ₹77 entry + 98% worthless + ₹1.95 stop are mutually incompatible.** Best overnight-hold: 2.5% OTM avg ₹837 net/lot (worst −₹221); 3% OTM avg ₹458 (worst −₹254). Scaled 55 lots/Cr, option 2.5% = avg ₹46K/Cr/event, tail breaches ₹7K cap ~3× in sample. SENSEX only 8 days in store — cannot backtest yet.
+- 2026-04-23 · 005 · NIFTY E-0 (expiry day) deep OTM premium survey, 10:00 entry, weekly Tue+Thu only · 48 E-0 days (29 Tue, 19 Thu) · Median entry: 1%=₹32, 1.5%=₹9.5, 2%=₹4.4, 3%=₹2.1, 4%=₹1.7, 5%=₹1.3 · 100% worthless at ≥2.5% OTM, 96% at 2% · MAE breach rate at 4-5% OTM = 2.1% (cleanest in entire dataset) · **Headline: at 4-5% OTM E-0, gross premium is captured 98%+ of days but is too small (₹40-100/lot) to clear placeholder ₹400/lot friction. Real-world friction flips it.**
+- 2026-04-23 · 006 · Portfolio-scale simulation at 55 lots/Cr + friction sensitivity sweep (₹40 / 100 / 200 / 400 per lot) on E-1 + E-0 samples · **WINNER: NIFTY E-1 · 2.5% OTM · 10:00 entry · hold to expiry 15:25 · 55 lots/Cr · ₹100/lot friction → 29% annualized on ₹1Cr · 100% win rate · 0 breaches of ₹7K/Cr cap in 46-day sample · mean ₹62K/Cr per event.** Backup: 3% OTM E-1 same params = 19% ann, 0 breaches. 2% OTM E-1 = 42% ann but 4.3% breach rate (occasional cap violations).
