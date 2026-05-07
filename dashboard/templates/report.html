@@ -1,0 +1,778 @@
+{% extends "base.html" %}
+{% block title %}Report · ThetaDesk{% endblock %}
+{% set active_nav = 'report' %}
+
+{% block content %}
+<div x-data="reportApp()" x-init="init()">
+
+  <!-- ─── HEADER ─── -->
+  <header class="flex items-end justify-between flex-wrap gap-4 mb-5">
+    <div>
+      <div class="flex items-center gap-3 mb-1">
+        <h1 class="text-[18px] font-semibold tracking-tight">Report</h1>
+        <!-- View toggle -->
+        <div class="flex items-center bg-[var(--bg)] rounded-md p-0.5 text-[11px]">
+          <button @click="view='live'" :class="view==='live'?'bg-[var(--surface)] shadow-sm font-semibold':'text-[var(--text-3)]'" class="px-2.5 py-1 rounded">Live</button>
+          <button @click="view='historical'; loadSnapshotsList()" :class="view==='historical'?'bg-[var(--surface)] shadow-sm font-semibold':'text-[var(--text-3)]'" class="px-2.5 py-1 rounded">Historical</button>
+        </div>
+        <span x-show="view==='live'" class="text-[11px] text-[var(--text-3)] num">updated <span x-text="posAnalysisTime || '—'"></span></span>
+      </div>
+      <div class="text-[11px] text-[var(--text-3)] num" x-show="view==='historical' && selectedDate">
+        <span x-text="selectedDate"></span> · <span x-text="activePositions.length"></span> legs · <span x-text="activeSummary.total_lots ?? 0"></span> lots
+      </div>
+    </div>
+
+    <!-- Right actions (live only) -->
+    <div class="flex items-center gap-2" x-show="view==='live'">
+      <button @click="showAddPosition = true" class="px-3 py-1.5 rounded-md text-[12px] font-medium bg-[var(--text-1)] text-[var(--surface)] hover:opacity-90">+ Add</button>
+      <button @click="showImport = true" class="px-3 py-1.5 rounded-md text-[12px] font-medium border border-[var(--border)] hover:bg-[var(--surface)]">📥 Import</button>
+      <button @click="saveDay()" class="px-3 py-1.5 rounded-md text-[12px] font-medium border border-[var(--border)] hover:bg-[var(--surface)]" title="Save today's snapshot for Historical view">💾 Save day</button>
+      <button @click="refreshAll()" class="px-3 py-1.5 rounded-md text-[12px] font-medium border border-[var(--border)] hover:bg-[var(--surface)]">↻</button>
+    </div>
+
+    <!-- Right actions (historical) -->
+    <div class="flex items-center gap-2" x-show="view==='historical'">
+      <select x-model="selectedDate" @change="loadSnapshot()" class="px-2.5 py-1.5 rounded-md text-[12px] border border-[var(--border)] bg-[var(--surface)] num">
+        <option value="">Pick a date…</option>
+        <template x-for="s in snapshotsList" :key="s.date">
+          <option :value="s.date" x-text="s.date + '  ·  ' + s.weekday + '  ·  ' + (s.total_mtm >= 0 ? '+₹' : '−₹') + Math.abs(s.total_mtm || 0).toLocaleString() + '  (' + s.n_positions + ' legs)'"></option>
+        </template>
+      </select>
+      <button @click="deleteSnapshot()" x-show="selectedDate" class="px-3 py-1.5 rounded-md text-[12px] font-medium border border-loss-200 text-loss-600 hover:bg-loss-50">Delete</button>
+    </div>
+  </header>
+
+  <!-- ─── KPI STRIP: live P&L · max profit · margin used · capture% ─── -->
+  <div class="card mb-5 grid grid-cols-2 md:grid-cols-4 divide-x divide-[var(--border)]" x-show="activePositions.length > 0">
+    <!-- Live P&L -->
+    <div class="px-5 py-4">
+      <div class="text-[10px] uppercase tracking-wider text-[var(--text-3)] font-semibold mb-1.5">Live P&amp;L</div>
+      <div class="num text-[24px] font-bold leading-none tracking-tight" :class="(activeSummary.total_mtm ?? 0) >= 0 ? 'text-gain-600':'text-loss-600'">
+        <span x-text="(activeSummary.total_mtm ?? 0)>=0 ? '+₹' : '−₹'"></span><span x-text="Math.abs(activeSummary.total_mtm || 0).toLocaleString()"></span>
+      </div>
+      <div class="num text-[10px] text-[var(--text-3)] mt-1.5">
+        <span x-text="activePositions.length"></span> legs · <span x-text="activeSummary.total_lots ?? 0"></span> lots
+        <span x-show="(activeSummary.n_action_needed ?? 0) > 0" class="text-warn-600 font-semibold ml-1">· ⚠ <span x-text="activeSummary.n_action_needed"></span></span>
+      </div>
+    </div>
+
+    <!-- Max profit at expiry -->
+    <div class="px-5 py-4">
+      <div class="text-[10px] uppercase tracking-wider text-[var(--text-3)] font-semibold mb-1.5">Max Profit @ Expiry</div>
+      <div class="num text-[24px] font-bold leading-none tracking-tight" x-text="'₹' + ((activeSummary.total_max_profit ?? 0)).toLocaleString()"></div>
+      <div class="num text-[10px] text-[var(--text-3)] mt-1.5">if all shorts expire worthless</div>
+    </div>
+
+    <!-- Total margin used -->
+    <div class="px-5 py-4">
+      <div class="text-[10px] uppercase tracking-wider text-[var(--text-3)] font-semibold mb-1.5">Margin Used</div>
+      <div class="num text-[24px] font-bold leading-none tracking-tight" x-text="'₹' + formatINR(activeSummary.total_margin ?? 0)"></div>
+      <div class="num text-[10px] text-[var(--text-3)] mt-1.5">
+        <span x-text="(activeSummary.margin_per_cr ?? 0) + ' Cr'"></span>
+        <span x-show="(activeSummary.total_premium_paid ?? 0) > 0" class="text-[var(--text-2)] ml-1">+ ₹<span x-text="formatINR(activeSummary.total_premium_paid ?? 0)"></span> premium</span>
+      </div>
+    </div>
+
+    <!-- Yield per Cr (target ₹5K/Cr) -->
+    <div class="px-5 py-4">
+      <div class="text-[10px] uppercase tracking-wider text-[var(--text-3)] font-semibold mb-1.5">Yield / Cr</div>
+      <div class="num text-[24px] font-bold leading-none tracking-tight" :class="yieldColor()">
+        ₹<span x-text="(activeSummary.yield_per_cr ?? 0).toLocaleString()"></span>
+      </div>
+      <div class="num text-[10px] text-[var(--text-3)] mt-1.5">
+        target ₹5K · floor ₹3K · max @ exp ₹<span x-text="(activeSummary.yield_per_cr_at_expiry ?? 0).toLocaleString()"></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ─── BUCKET STRIP ─── -->
+  <div class="card mb-5 px-5 py-3 grid grid-cols-2 md:grid-cols-4 gap-px bg-[var(--border)]" x-show="activePositions.length > 0" style="background: var(--border);">
+    <template x-for="(grp, key) in groupedByBucket()" :key="key">
+      <div class="bg-[var(--surface)] px-4 py-2">
+        <div class="text-[10px] uppercase tracking-wider text-[var(--text-3)] font-semibold" x-text="grp.label"></div>
+        <div class="flex items-baseline gap-2 mt-1">
+          <span class="num text-[15px] font-semibold" :class="(grp.mtm || 0) >= 0 ? 'text-[var(--text-1)]':'text-loss-600'" x-text="((grp.mtm || 0)>=0?'+₹':'−₹')+Math.abs(grp.mtm || 0).toLocaleString()"></span>
+          <span class="num text-[10px] text-[var(--text-3)]" x-text="grp.legs + ' · ' + grp.lots + 'L'"></span>
+        </div>
+      </div>
+    </template>
+  </div>
+
+  <!-- ─── 2-col: Positions table + side panel ─── -->
+  <div class="grid grid-cols-1 lg:grid-cols-[1fr_280px] gap-5">
+
+    <!-- POSITIONS TABLE — readable -->
+    <div class="card overflow-hidden">
+      <div class="px-5 py-3 border-b border-[var(--border)] flex items-center justify-between flex-wrap gap-2">
+        <div class="flex items-center gap-3">
+          <h2 class="text-[14px] font-semibold tracking-tight">Positions</h2>
+          <span class="num text-[11px] text-[var(--text-3)]" x-text="filteredRows().length + ' rows · ' + activePositions.length + ' fills'"></span>
+        </div>
+        <div class="flex flex-wrap gap-2 items-center">
+          <!-- View mode toggle -->
+          <div class="flex items-center bg-[var(--bg)] rounded-md p-0.5 text-[11px]">
+            <button @click="tableView='aggregated'" :class="tableView==='aggregated'?'bg-[var(--surface)] shadow-sm font-semibold':'text-[var(--text-3)]'" class="px-2 py-0.5 rounded">Combined</button>
+            <button @click="tableView='all'" :class="tableView==='all'?'bg-[var(--surface)] shadow-sm font-semibold':'text-[var(--text-3)]'" class="px-2 py-0.5 rounded">All fills</button>
+          </div>
+          <select x-model="filterBucket" class="px-2 py-1 rounded-md text-[11px] border border-[var(--border)] bg-[var(--surface)]">
+            <option value="all">All buckets</option>
+            <option value="A">Bucket A · Deep OTM</option>
+            <option value="B2">Bucket B2 · Mid</option>
+            <option value="B1">Bucket B1 · ATM</option>
+            <option value="L">Lottery / Long</option>
+          </select>
+          <select x-model="filterInstrument" class="px-2 py-1 rounded-md text-[11px] border border-[var(--border)] bg-[var(--surface)]">
+            <option value="all">All instruments</option>
+            <option value="SENSEX">SENSEX</option>
+            <option value="NIFTY">NIFTY</option>
+          </select>
+          <select x-model="filterReco" class="px-2 py-1 rounded-md text-[11px] border border-[var(--border)] bg-[var(--surface)]">
+            <option value="all">All status</option>
+            <option value="HOLD">Hold</option>
+            <option value="WATCH">Watch</option>
+            <option value="action">Action needed</option>
+          </select>
+          <select x-model="sortBy" class="px-2 py-1 rounded-md text-[11px] border border-[var(--border)] bg-[var(--surface)]">
+            <option value="mtm">Sort: MTM</option>
+            <option value="strike">Sort: Strike</option>
+            <option value="lots">Sort: Lots</option>
+            <option value="cushion">Sort: Cushion</option>
+            <option value="dist">Sort: Distance</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="overflow-x-auto" x-show="activePositions.length > 0">
+        <table class="w-full num text-[13px]" style="border-collapse: separate; border-spacing: 0;">
+          <thead>
+            <tr class="bg-[var(--bg)]">
+              <th class="text-left px-4 py-3 text-[10px] font-bold uppercase tracking-wider text-[var(--text-3)] border-b border-[var(--border)]">Instrument</th>
+              <th class="text-left px-3 py-3 text-[10px] font-bold uppercase tracking-wider text-[var(--text-3)] border-b border-[var(--border)]">Strike</th>
+              <th class="text-center px-2 py-3 text-[10px] font-bold uppercase tracking-wider text-[var(--text-3)] border-b border-[var(--border)]">Type</th>
+              <th class="text-right px-3 py-3 text-[10px] font-bold uppercase tracking-wider text-[var(--text-3)] border-b border-[var(--border)]">Lots</th>
+              <th class="text-right px-3 py-3 text-[10px] font-bold uppercase tracking-wider text-[var(--text-3)] border-b border-[var(--border)]">Avg ₹</th>
+              <th class="text-right px-3 py-3 text-[10px] font-bold uppercase tracking-wider text-[var(--text-3)] border-b border-[var(--border)]">LTP ₹</th>
+              <th class="text-right px-3 py-3 text-[10px] font-bold uppercase tracking-wider text-[var(--text-3)] border-b border-[var(--border)] hidden lg:table-cell">Dist %</th>
+              <th class="text-right px-3 py-3 text-[10px] font-bold uppercase tracking-wider text-[var(--text-3)] border-b border-[var(--border)] hidden lg:table-cell">σ</th>
+              <th class="text-right px-4 py-3 text-[10px] font-bold uppercase tracking-wider text-[var(--text-3)] border-b border-[var(--border)] bg-[var(--bg)]">MTM</th>
+              <th class="text-center px-3 py-3 text-[10px] font-bold uppercase tracking-wider text-[var(--text-3)] border-b border-[var(--border)]">Status</th>
+              <th class="text-left px-3 py-3 text-[10px] font-bold uppercase tracking-wider text-[var(--text-3)] border-b border-[var(--border)] hidden xl:table-cell">Note</th>
+              <th class="border-b border-[var(--border)]"></th>
+            </tr>
+          </thead>
+          <tbody>
+            <template x-for="(p, idx) in filteredRows()" :key="idx + '_' + p.strike + '_' + p.side + '_' + (p.qty < 0 ? 'S' : 'L')">
+              <template x-if="true">
+                <tbody class="contents">
+                  <!-- Aggregated row -->
+                  <tr class="hover:bg-[var(--bg)] border-b border-[var(--border)] cursor-pointer" :class="rowAccent(p)" @click="toggleExpand(p)">
+                    <td class="px-4 py-3 font-medium text-[12px] text-[var(--text-2)]">
+                      <span x-text="p.instrument"></span>
+                      <span x-show="(p.n_fills || 1) > 1" class="ml-1 text-[var(--text-3)] text-[10px]">▶</span>
+                    </td>
+                    <td class="px-3 py-3"><span class="font-bold text-[14px] tracking-tight" x-text="p.strike"></span></td>
+                    <td class="px-2 py-3 text-center">
+                      <span class="px-2 py-0.5 rounded text-[10px] font-bold" :class="p.side === 'CE' ? 'bg-loss-50 text-loss-700 dark:bg-loss-500/10' : 'bg-gain-50 text-gain-700 dark:bg-gain-500/10'" x-text="p.side"></span>
+                    </td>
+                    <td class="px-3 py-3 text-right">
+                      <span class="font-semibold" :class="p.qty < 0 ? 'text-loss-600' : 'text-gain-600'" x-text="(p.qty<0?'−':'+') + (p.qty_lots ?? 0)"></span>
+                      <span x-show="(p.n_fills || 1) > 1" class="text-[10px] text-[var(--text-3)] ml-1" x-text="'(' + p.n_fills + ')'"></span>
+                    </td>
+                    <td class="px-3 py-3 text-right text-[var(--text-2)]" x-text="(p.avg_price ?? 0).toFixed(2)"></td>
+                    <td class="px-3 py-3 text-right font-semibold" x-text="p.ltp != null ? Number(p.ltp).toFixed(2) : '—'"></td>
+                    <td class="px-3 py-3 text-right text-[var(--text-2)] hidden lg:table-cell" x-text="((p.dist_pct ?? 0)>=0?'+':'')+(p.dist_pct ?? 0).toFixed(2)+'%'"></td>
+                    <td class="px-3 py-3 text-right hidden lg:table-cell" :class="cushColor(p.cushion ?? 0)" x-text="(p.cushion ?? 0).toFixed(2)"></td>
+                    <td class="px-4 py-3 text-right font-bold bg-[var(--bg)]" :class="(p.mtm_total ?? 0) >= 0 ? 'text-gain-600' : 'text-loss-600'" x-text="((p.mtm_total ?? 0)>=0?'+₹':'−₹')+Math.abs(p.mtm_total || 0).toLocaleString()"></td>
+                    <td class="px-3 py-3 text-center">
+                      <span class="pill" :class="recBadge(p.recommendation)" x-text="p.recommendation || '—'"></span>
+                    </td>
+                    <td class="px-3 py-3 text-[11px] text-[var(--text-2)] hidden xl:table-cell max-w-xs">
+                      <span class="line-clamp-2" x-text="p.rec_reason ?? p.error ?? ''" :title="p.rec_reason ?? ''"></span>
+                    </td>
+                    <td class="px-3 py-3 text-right" @click.stop>
+                      <button x-show="view==='live' && (!p.fills || p.fills.length === 1)" @click="removeAggregated(p)" class="text-[var(--text-3)] hover:text-loss-600 text-[16px] leading-none">×</button>
+                    </td>
+                  </tr>
+                  <!-- Drill-down: individual fills -->
+                  <template x-if="p.fills && p.fills.length > 1 && expanded[expandKey(p)]">
+                    <template x-for="(f, fi) in p.fills" :key="fi">
+                      <tr class="bg-[var(--bg)]/40 border-b border-[var(--border)]">
+                        <td class="pl-10 pr-2 py-2 text-[11px] text-[var(--text-3)] num" x-text="f.broker || '—'"></td>
+                        <td class="px-3 py-2 text-[11px] text-[var(--text-3)] num" x-text="f.demat || '—'"></td>
+                        <td class="px-2 py-2"></td>
+                        <td class="px-3 py-2 text-right text-[11px] num" :class="f.qty < 0 ? 'text-loss-500' : 'text-gain-500'" x-text="(f.qty<0?'−':'+') + (Math.abs(f.qty) / (f.instrument === 'NIFTY' ? 75 : 20))"></td>
+                        <td class="px-3 py-2 text-right text-[11px] num text-[var(--text-2)]" x-text="(f.avg_price ?? 0).toFixed(2)"></td>
+                        <td class="px-3 py-2 text-right text-[11px] num" x-text="f.ltp != null ? Number(f.ltp).toFixed(2) : '—'"></td>
+                        <td class="px-3 py-2 hidden lg:table-cell"></td>
+                        <td class="px-3 py-2 hidden lg:table-cell"></td>
+                        <td class="px-4 py-2 text-right text-[11px] num" :class="(f.mtm_total ?? 0) >= 0 ? 'text-gain-500' : 'text-loss-500'" x-text="((f.mtm_total ?? 0)>=0?'+₹':'−₹')+Math.abs(f.mtm_total || 0).toLocaleString()"></td>
+                        <td class="px-3 py-2"></td>
+                        <td class="px-3 py-2 text-[10px] text-[var(--text-3)] hidden xl:table-cell" x-text="(f.time || '') + (f.note ? ' · ' + f.note : '')"></td>
+                        <td class="px-3 py-2 text-right" @click.stop>
+                          <button x-show="view==='live'" @click="removeFill(f)" class="text-[var(--text-3)] hover:text-loss-600 text-[14px] leading-none">×</button>
+                        </td>
+                      </tr>
+                    </template>
+                  </template>
+                </tbody>
+              </template>
+            </template>
+          </tbody>
+          <!-- Footer: totals -->
+          <tfoot>
+            <tr class="bg-[var(--bg)] font-semibold">
+              <td colspan="3" class="px-4 py-3 text-[10px] uppercase tracking-wider text-[var(--text-3)]">Total · <span x-text="filteredRows().length"></span> rows</td>
+              <td class="px-3 py-3 text-right num text-[var(--text-2)]" x-text="filteredRows().reduce((s,p)=>s+(p.qty_lots ?? 0)*(p.qty<0?-1:1),0)"></td>
+              <td colspan="4"></td>
+              <td class="px-4 py-3 text-right font-bold num" :class="filteredMTM() >= 0 ? 'text-gain-600' : 'text-loss-600'" x-text="(filteredMTM()>=0?'+₹':'−₹')+Math.abs(filteredMTM()).toLocaleString()"></td>
+              <td colspan="3"></td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+
+      <div x-show="activePositions.length === 0" class="px-5 py-16 text-center">
+        <div class="text-[14px] font-semibold mb-1" x-text="view==='live' ? 'No positions tracked' : 'No data for this date'"></div>
+        <div class="text-[12px] text-[var(--text-3)] mb-5" x-text="view==='live' ? 'Add your fills to see live MTM and recommendations.' : 'Pick a different date or save today\\'s snapshot first.'"></div>
+        <div class="flex gap-2 justify-center" x-show="view==='live'">
+          <button @click="showAddPosition = true" class="px-4 py-2 rounded-md text-[12px] font-medium bg-[var(--text-1)] text-[var(--surface)]">+ Add</button>
+          <button @click="loadDemo()" class="px-4 py-2 rounded-md text-[12px] font-medium border border-[var(--border)]">Load demo</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- SIDE PANEL -->
+    <aside class="space-y-4">
+      <!-- Pin Map (live only) -->
+      <div class="card p-4" x-show="view==='live'">
+        <div class="text-[10px] uppercase tracking-wider text-[var(--text-3)] font-semibold mb-3">Pin Map</div>
+        <div class="space-y-3 num text-[11px]">
+          <template x-for="ix in ['SENSEX','NIFTY']" :key="ix">
+            <div class="border-b border-[var(--border)] pb-3 last:border-b-0 last:pb-0">
+              <div class="flex items-center justify-between mb-1">
+                <span class="text-[var(--text-3)]" x-text="ix"></span>
+                <span class="text-[var(--text-3)]" x-text="contexts?.[ix]?.expiry ?? ''"></span>
+              </div>
+              <div class="flex items-baseline gap-1.5">
+                <span class="font-semibold text-[14px]" x-text="snapshot?.[ix]?.spot ?? '—'"></span>
+                <span class="text-[10px]" :class="(snapshot?.[ix]?.change_pct ?? 0) >= 0 ? 'text-gain-600':'text-loss-600'" x-text="((snapshot?.[ix]?.change_pct ?? 0)>=0?'+':'')+(snapshot?.[ix]?.change_pct ?? 0)+'%'"></span>
+              </div>
+              <div class="text-[10px] text-[var(--text-3)] mt-0.5">
+                Pin <span class="text-[var(--text-2)]" x-text="contexts?.[ix]?.max_pain ?? '—'"></span>
+              </div>
+            </div>
+          </template>
+          <div class="flex items-baseline justify-between">
+            <span class="text-[var(--text-3)]">VIX</span>
+            <span><span class="font-semibold" :class="vixColorClass()" x-text="snapshot?.vix ?? '—'"></span> <span class="text-[10px] text-[var(--text-3)]" x-text="vixRegime()"></span></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Historical context (when viewing past date) -->
+      <div class="card p-4" x-show="view==='historical' && selectedDate && histSnapshot">
+        <div class="text-[10px] uppercase tracking-wider text-[var(--text-3)] font-semibold mb-3">Day Context</div>
+        <div class="space-y-2 text-[11px] num">
+          <div class="flex justify-between"><span class="text-[var(--text-3)]">Saved at</span><span x-text="histSnapshot?.saved_at ?? '—'"></span></div>
+          <template x-for="ix in ['SENSEX','NIFTY']" :key="ix">
+            <div class="border-t border-[var(--border)] pt-2">
+              <div class="flex justify-between mb-1"><span class="text-[var(--text-3)]" x-text="ix"></span><span class="font-semibold" x-text="histSnapshot?.market?.[ix]?.spot ?? '—'"></span></div>
+              <div class="flex justify-between text-[10px] text-[var(--text-3)]">
+                <span>O <span class="text-[var(--text-2)]" x-text="histSnapshot?.market?.[ix]?.open ?? '—'"></span></span>
+                <span>H <span class="text-[var(--text-2)]" x-text="histSnapshot?.market?.[ix]?.high ?? '—'"></span></span>
+                <span>L <span class="text-[var(--text-2)]" x-text="histSnapshot?.market?.[ix]?.low ?? '—'"></span></span>
+              </div>
+            </div>
+          </template>
+          <div class="border-t border-[var(--border)] pt-2 flex justify-between"><span class="text-[var(--text-3)]">VIX</span><span class="font-semibold" x-text="histSnapshot?.market?.vix ?? '—'"></span></div>
+          <div x-show="histSnapshot?.note" class="border-t border-[var(--border)] pt-2 text-[var(--text-2)]" x-text="histSnapshot?.note"></div>
+        </div>
+      </div>
+
+      <!-- Action items -->
+      <div class="card p-4" x-show="(activeSummary.n_action_needed ?? 0) > 0 && view==='live'">
+        <div class="text-[10px] uppercase tracking-wider text-warn-600 font-semibold mb-3">⚠ Action items</div>
+        <div class="space-y-2.5">
+          <template x-for="(p, idx) in actionItems()" :key="idx">
+            <div>
+              <div class="flex items-center gap-1.5 mb-0.5">
+                <span class="pill text-[9px]" :class="recBadge(p.recommendation)" x-text="p.recommendation"></span>
+                <span class="font-semibold num text-[11px]" x-text="p.strike + ' ' + p.side"></span>
+                <span class="num text-[10px] text-[var(--text-3)] ml-auto" x-text="(p.qty_lots ?? 0)+'L'"></span>
+              </div>
+              <div class="text-[10px] text-[var(--text-2)] leading-snug" x-text="p.rec_reason"></div>
+            </div>
+          </template>
+        </div>
+      </div>
+
+      <!-- Stats -->
+      <div class="card p-4" x-show="activePositions.length > 0">
+        <div class="text-[10px] uppercase tracking-wider text-[var(--text-3)] font-semibold mb-3">Breakdown</div>
+        <div class="space-y-1.5 text-[11px] num">
+          <div class="flex justify-between"><span class="text-[var(--text-3)]">Hold</span><span x-text="filterCount('HOLD')"></span></div>
+          <div class="flex justify-between"><span class="text-[var(--text-3)]">Watch</span><span class="text-warn-500" x-text="filterCount('WATCH')"></span></div>
+          <div class="flex justify-between"><span class="text-[var(--text-3)]">Cut partial</span><span class="text-warn-600" x-text="filterCount('CUT_PARTIAL')"></span></div>
+          <div class="flex justify-between"><span class="text-[var(--text-3)]">Cut all</span><span class="text-loss-600" x-text="filterCount('CUT_ALL')"></span></div>
+          <div class="border-t border-[var(--border)] pt-1.5 flex justify-between"><span class="text-[var(--text-3)]">SENSEX legs</span><span x-text="instCount('SENSEX')"></span></div>
+          <div class="flex justify-between"><span class="text-[var(--text-3)]">NIFTY legs</span><span x-text="instCount('NIFTY')"></span></div>
+        </div>
+      </div>
+    </aside>
+  </div>
+
+  <!-- ADD POSITION MODAL -->
+  <div x-show="showAddPosition" x-cloak @click.self="showAddPosition = false" class="fixed inset-0 bg-black/40 z-40 flex items-end md:items-center justify-center">
+    <div class="card max-w-md w-full m-4 p-5" @click.stop>
+      <div class="flex items-center justify-between mb-4">
+        <h3 class="text-[14px] font-semibold">Add position</h3>
+        <button @click="showAddPosition = false" class="text-[var(--text-3)] hover:text-[var(--text-1)] text-[18px] leading-none">×</button>
+      </div>
+      <div class="grid grid-cols-2 gap-3 text-[12px]">
+        <div><label class="text-[10px] text-[var(--text-3)] uppercase tracking-wider">Instrument</label>
+          <select x-model="newPos.instrument" class="w-full mt-1 px-2.5 py-1.5 rounded-md border border-[var(--border)] bg-[var(--surface)]"><option value="SENSEX">SENSEX</option><option value="NIFTY">NIFTY</option></select></div>
+        <div><label class="text-[10px] text-[var(--text-3)] uppercase tracking-wider">Strike</label>
+          <input type="number" x-model.number="newPos.strike" class="w-full mt-1 px-2.5 py-1.5 rounded-md border border-[var(--border)] bg-[var(--surface)] num" placeholder="80000"></div>
+        <div><label class="text-[10px] text-[var(--text-3)] uppercase tracking-wider">Side</label>
+          <select x-model="newPos.side" class="w-full mt-1 px-2.5 py-1.5 rounded-md border border-[var(--border)] bg-[var(--surface)]"><option value="CE">CE</option><option value="PE">PE</option></select></div>
+        <div><label class="text-[10px] text-[var(--text-3)] uppercase tracking-wider">Direction</label>
+          <select x-model="newPos.dir" class="w-full mt-1 px-2.5 py-1.5 rounded-md border border-[var(--border)] bg-[var(--surface)]"><option value="-1">SHORT</option><option value="1">LONG</option></select></div>
+        <div><label class="text-[10px] text-[var(--text-3)] uppercase tracking-wider">Qty (shares)</label>
+          <input type="number" x-model.number="newPos.qty_abs" class="w-full mt-1 px-2.5 py-1.5 rounded-md border border-[var(--border)] bg-[var(--surface)] num" placeholder="1000"></div>
+        <div><label class="text-[10px] text-[var(--text-3)] uppercase tracking-wider">Avg price</label>
+          <input type="number" step="0.05" x-model.number="newPos.avg_price" class="w-full mt-1 px-2.5 py-1.5 rounded-md border border-[var(--border)] bg-[var(--surface)] num" placeholder="2.55"></div>
+        <div><label class="text-[10px] text-[var(--text-3)] uppercase tracking-wider">Broker (optional)</label>
+          <input type="text" x-model="newPos.broker" class="w-full mt-1 px-2.5 py-1.5 rounded-md border border-[var(--border)] bg-[var(--surface)]" placeholder="Axis / Monarch"></div>
+        <div><label class="text-[10px] text-[var(--text-3)] uppercase tracking-wider">Demat (optional)</label>
+          <input type="text" x-model="newPos.demat" class="w-full mt-1 px-2.5 py-1.5 rounded-md border border-[var(--border)] bg-[var(--surface)]" placeholder="A-001"></div>
+        <div class="col-span-2"><label class="text-[10px] text-[var(--text-3)] uppercase tracking-wider">Note (optional)</label>
+          <input type="text" x-model="newPos.note" class="w-full mt-1 px-2.5 py-1.5 rounded-md border border-[var(--border)] bg-[var(--surface)]" placeholder="Bucket A · Mid Risk · etc"></div>
+      </div>
+      <div class="flex justify-end gap-2 mt-5">
+        <button @click="showAddPosition = false" class="px-4 py-1.5 rounded-md text-[12px] font-medium border border-[var(--border)]">Cancel</button>
+        <button @click="addPosition()" class="px-4 py-1.5 rounded-md text-[12px] font-medium bg-[var(--text-1)] text-[var(--surface)]">Add</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- IMPORT MODAL — Sheet, JSON paste, sample -->
+  <div x-show="showImport" x-cloak @click.self="showImport = false" class="fixed inset-0 bg-black/40 z-40 flex items-center justify-center">
+    <div class="card max-w-xl w-full m-4 p-5" @click.stop>
+      <div class="flex items-center justify-between mb-4">
+        <h3 class="text-[14px] font-semibold">Import positions</h3>
+        <button @click="showImport = false" class="text-[var(--text-3)] hover:text-[var(--text-1)] text-[18px] leading-none">×</button>
+      </div>
+
+      <!-- Tabs -->
+      <div class="flex gap-1 mb-4 text-[12px] border-b border-[var(--border)]">
+        <button @click="importTab='manual'; if (!manualRows.length) addManualRow()" :class="importTab==='manual' ? 'border-b-2 border-[var(--text-1)] text-[var(--text-1)] font-semibold' : 'text-[var(--text-3)]'" class="px-3 py-2 -mb-px">Manual entry</button>
+        <button @click="importTab='sheet'" :class="importTab==='sheet' ? 'border-b-2 border-[var(--text-1)] text-[var(--text-1)] font-semibold' : 'text-[var(--text-3)]'" class="px-3 py-2 -mb-px">Google Sheet</button>
+        <button @click="importTab='json'" :class="importTab==='json' ? 'border-b-2 border-[var(--text-1)] text-[var(--text-1)] font-semibold' : 'text-[var(--text-3)]'" class="px-3 py-2 -mb-px">Paste JSON</button>
+        <button @click="importTab='demo'" :class="importTab==='demo' ? 'border-b-2 border-[var(--text-1)] text-[var(--text-1)] font-semibold' : 'text-[var(--text-3)]'" class="px-3 py-2 -mb-px">Demo data</button>
+      </div>
+
+      <!-- Manual entry — multi-row form -->
+      <div x-show="importTab==='manual'" class="space-y-3 text-[12px]">
+        <div class="text-[11px] text-[var(--text-3)]">Add multiple legs at once. <strong>qty in shares</strong> (negative = SHORT, positive = LONG).</div>
+        <div class="overflow-x-auto max-h-[40vh]">
+          <table class="w-full text-[11px] num">
+            <thead class="text-[10px] uppercase text-[var(--text-3)] font-semibold">
+              <tr>
+                <th class="text-left p-1.5">Inst</th>
+                <th class="text-right p-1.5">Strike</th>
+                <th class="text-left p-1.5">Side</th>
+                <th class="text-right p-1.5">Qty</th>
+                <th class="text-right p-1.5">Price</th>
+                <th class="text-left p-1.5">Broker</th>
+                <th class="text-left p-1.5">Demat</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              <template x-for="(row, i) in manualRows" :key="i">
+                <tr class="border-t border-[var(--border)]">
+                  <td class="p-1"><select x-model="row.instrument" class="px-1 py-1 rounded border border-[var(--border)] bg-[var(--surface)] text-[11px] w-20"><option value="SENSEX">SENSEX</option><option value="NIFTY">NIFTY</option></select></td>
+                  <td class="p-1"><input type="number" x-model.number="row.strike" placeholder="80000" class="w-20 px-1 py-1 rounded border border-[var(--border)] bg-[var(--surface)] num text-right"></td>
+                  <td class="p-1"><select x-model="row.side" class="px-1 py-1 rounded border border-[var(--border)] bg-[var(--surface)] text-[11px] w-14"><option value="CE">CE</option><option value="PE">PE</option></select></td>
+                  <td class="p-1"><input type="number" x-model.number="row.qty" placeholder="-1000" class="w-20 px-1 py-1 rounded border border-[var(--border)] bg-[var(--surface)] num text-right"></td>
+                  <td class="p-1"><input type="number" step="0.01" x-model.number="row.avg_price" placeholder="2.55" class="w-16 px-1 py-1 rounded border border-[var(--border)] bg-[var(--surface)] num text-right"></td>
+                  <td class="p-1"><input type="text" x-model="row.broker" placeholder="Axis" class="w-20 px-1 py-1 rounded border border-[var(--border)] bg-[var(--surface)]"></td>
+                  <td class="p-1"><input type="text" x-model="row.demat" placeholder="A-001" class="w-20 px-1 py-1 rounded border border-[var(--border)] bg-[var(--surface)]"></td>
+                  <td class="p-1 text-right"><button @click="manualRows.splice(i, 1)" class="text-[var(--text-3)] hover:text-loss-600">×</button></td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+        </div>
+        <div class="flex justify-between items-center">
+          <button @click="addManualRow()" class="text-[11px] px-2 py-1 rounded border border-[var(--border)] hover:bg-[var(--bg)]">+ Add row</button>
+          <span class="text-[10px] text-[var(--text-3)]" x-text="manualRows.length + ' rows'"></span>
+        </div>
+        <div class="flex gap-2 items-center pt-2 border-t border-[var(--border)]">
+          <select x-model="importMode" class="px-2.5 py-1.5 rounded-md border border-[var(--border)] bg-[var(--surface)] text-[12px]">
+            <option value="append">Append to existing</option>
+            <option value="replace">Replace all</option>
+          </select>
+          <button @click="importFromManual()" class="ml-auto px-4 py-1.5 rounded-md text-[12px] font-medium bg-[var(--text-1)] text-[var(--surface)]">Save all</button>
+        </div>
+      </div>
+
+      <!-- Google Sheet -->
+      <div x-show="importTab==='sheet'" class="space-y-3 text-[12px]">
+        <div>
+          <label class="text-[10px] text-[var(--text-3)] uppercase tracking-wider">Sheet URL (share publicly OR publish to web → CSV)</label>
+          <input type="text" x-model="importSheetUrl" class="w-full mt-1 px-2.5 py-1.5 rounded-md border border-[var(--border)] bg-[var(--surface)] num text-[11px]" placeholder="https://docs.google.com/spreadsheets/d/.../edit#gid=0">
+        </div>
+        <div class="text-[11px] text-[var(--text-3)]">
+          <div class="font-semibold text-[var(--text-2)] mb-1">Required headers (case-insensitive):</div>
+          <div class="num bg-[var(--bg)] p-2 rounded">instrument | strike | side | qty | price | broker | demat | time | note</div>
+          <div class="mt-2 text-[10px]">qty negative = SHORT, positive = LONG. broker / demat / time / note are optional.</div>
+        </div>
+        <div class="flex gap-2 items-center">
+          <select x-model="importMode" class="px-2.5 py-1.5 rounded-md border border-[var(--border)] bg-[var(--surface)] text-[12px]">
+            <option value="append">Append to existing</option>
+            <option value="replace">Replace all</option>
+          </select>
+          <button @click="importFromSheet()" class="ml-auto px-4 py-1.5 rounded-md text-[12px] font-medium bg-[var(--text-1)] text-[var(--surface)]">Fetch &amp; import</button>
+        </div>
+        <div x-show="importStatus" class="text-[11px] num p-2.5 rounded bg-[var(--bg)]" x-text="importStatus"></div>
+      </div>
+
+      <!-- JSON paste -->
+      <div x-show="importTab==='json'" class="space-y-3 text-[12px]">
+        <div>
+          <label class="text-[10px] text-[var(--text-3)] uppercase tracking-wider">JSON array of positions</label>
+          <textarea x-model="importJsonText" rows="10" class="w-full mt-1 px-2.5 py-1.5 rounded-md border border-[var(--border)] bg-[var(--surface)] num text-[11px]" placeholder='[{"instrument":"SENSEX","strike":80000,"side":"CE","qty":-1064,"avg_price":2.41,"broker":"Monarch","demat":"M-001"}, ...]'></textarea>
+        </div>
+        <div class="flex gap-2 items-center">
+          <select x-model="importMode" class="px-2.5 py-1.5 rounded-md border border-[var(--border)] bg-[var(--surface)] text-[12px]">
+            <option value="append">Append</option>
+            <option value="replace">Replace</option>
+          </select>
+          <button @click="importFromJson()" class="ml-auto px-4 py-1.5 rounded-md text-[12px] font-medium bg-[var(--text-1)] text-[var(--surface)]">Import</button>
+        </div>
+      </div>
+
+      <!-- Demo -->
+      <div x-show="importTab==='demo'" class="space-y-3 text-[12px]">
+        <p class="text-[var(--text-2)]">Loads 12 sample SENSEX positions from 7-May expiry day (full Bucket A + Mid + lottery layered across Axis &amp; Monarch).</p>
+        <button @click="loadDemo(); showImport=false" class="px-4 py-1.5 rounded-md text-[12px] font-medium bg-[var(--text-1)] text-[var(--surface)]">Load demo set</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- toast -->
+  <div x-show="toast" x-cloak class="fixed bottom-5 right-5 px-4 py-2.5 rounded-md shadow-lg bg-[var(--text-1)] text-[var(--surface)] text-[12px] font-medium z-50" x-text="toast"></div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function reportApp() {
+  return {
+    // View
+    view: 'live',  // 'live' | 'historical'
+    selectedDate: '',
+    snapshotsList: [],
+    histSnapshot: null,
+
+    // Live state
+    snapshot: null,
+    contexts: { SENSEX: null, NIFTY: null },
+    positions: JSON.parse(localStorage.getItem('positions') || '[]'),
+    positionsAnalyzed: [],
+    positionsAggregated: [],
+    posSummary: {},
+    posAnalysisTime: '',
+
+    // UI
+    showAddPosition: false,
+    showImport: false,
+    importTab: 'sheet',
+    importSheetUrl: localStorage.getItem('importSheetUrl') || '',
+    importMode: 'append',     // 'append' | 'replace'
+    importJsonText: '',
+    importStatus: '',
+    manualRows: [],   // [{instrument, strike, side, qty, avg_price, broker, demat}, ...]
+    expanded: {},             // expandKey() → bool
+    tableView: 'aggregated',  // 'aggregated' | 'all'
+    newPos: { instrument: 'SENSEX', strike: 0, side: 'CE', dir: '-1', qty_abs: 0, avg_price: 0, broker: '', demat: '', note: '' },
+    filterReco: 'all', filterBucket: 'all', filterInstrument: 'all',
+    sortBy: 'mtm',
+    toast: '',
+
+    // Computed: which positions/summary to show based on view
+    get activePositions() {
+      return this.view === 'live' ? this.positionsAnalyzed : (this.histSnapshot?.analysis || []);
+    },
+    get activeSummary() {
+      return this.view === 'live' ? this.posSummary : (this.histSnapshot?.summary || {});
+    },
+
+    async init() { await this.refreshAll(); setInterval(() => { if (this.view === 'live') this.refreshAll(); }, 15000); },
+    async refreshAll() {
+      try {
+        const [snap, sCtx, nCtx] = await Promise.all([
+          fetch('/api/snapshot').then(r => r.json()),
+          fetch('/api/strategy/SENSEX?risk=default').then(r => r.json()).catch(() => null),
+          fetch('/api/strategy/NIFTY?risk=default').then(r => r.json()).catch(() => null),
+        ]);
+        this.snapshot = snap;
+        this.contexts.SENSEX = sCtx;
+        this.contexts.NIFTY = nCtx;
+        await this.refreshPositions();
+      } catch (e) { console.error(e); }
+    },
+    async refreshPositions() {
+      if (this.positions.length === 0) { this.positionsAnalyzed = []; this.positionsAggregated = []; this.posSummary = {}; return; }
+      try {
+        const r = await fetch('/api/position-analysis', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ positions: this.positions }) });
+        const j = await r.json();
+        this.positionsAnalyzed = j.positions || [];
+        this.positionsAggregated = j.aggregated || [];
+        this.posSummary = j.summary || {};
+        this.posAnalysisTime = j.ist_time || '';
+      } catch (e) { console.error(e); }
+    },
+    async loadSnapshotsList() {
+      try {
+        const r = await fetch('/api/snapshots');
+        const j = await r.json();
+        this.snapshotsList = j.snapshots || [];
+      } catch (e) { console.error(e); }
+    },
+    async loadSnapshot() {
+      if (!this.selectedDate) { this.histSnapshot = null; return; }
+      try {
+        const r = await fetch(`/api/snapshot/${this.selectedDate}`);
+        const j = await r.json();
+        this.histSnapshot = j;
+      } catch (e) { this.toast = '× Load failed'; setTimeout(() => this.toast = '', 2000); }
+    },
+    async saveDay() {
+      const note = prompt('Optional note for today\'s snapshot:', '') || '';
+      try {
+        const r = await fetch('/api/snapshot/save', {
+          method: 'POST', headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({ positions: this.positions, note })
+        });
+        const j = await r.json();
+        if (j.success) {
+          this.toast = `✓ Saved ${j.date} · ${j.n_positions} legs`;
+          setTimeout(() => this.toast = '', 2500);
+        } else { this.toast = '× ' + (j.error || 'Save failed'); setTimeout(() => this.toast = '', 3000); }
+      } catch (e) { this.toast = '× ' + e.message; setTimeout(() => this.toast = '', 3000); }
+    },
+    async deleteSnapshot() {
+      if (!this.selectedDate) return;
+      if (!confirm(`Delete snapshot for ${this.selectedDate}?`)) return;
+      await fetch(`/api/snapshot/${this.selectedDate}`, { method: 'DELETE' });
+      this.histSnapshot = null; this.selectedDate = '';
+      this.loadSnapshotsList();
+      this.toast = 'Deleted'; setTimeout(() => this.toast = '', 1500);
+    },
+
+    addPosition() {
+      if (!this.newPos.strike || !this.newPos.qty_abs || !this.newPos.avg_price) {
+        this.toast = '× Fill all fields'; setTimeout(() => this.toast = '', 2000); return;
+      }
+      const qty = Number(this.newPos.qty_abs) * Number(this.newPos.dir);
+      const fill = { instrument: this.newPos.instrument, strike: this.newPos.strike, side: this.newPos.side, qty, avg_price: this.newPos.avg_price };
+      if (this.newPos.broker) fill.broker = this.newPos.broker;
+      if (this.newPos.demat) fill.demat = this.newPos.demat;
+      if (this.newPos.note) fill.note = this.newPos.note;
+      fill.time = new Date().toISOString().slice(0, 16).replace('T', ' ');
+      this.positions.push(fill);
+      localStorage.setItem('positions', JSON.stringify(this.positions));
+      this.newPos = { instrument: 'SENSEX', strike: 0, side: 'CE', dir: '-1', qty_abs: 0, avg_price: 0, broker: '', demat: '', note: '' };
+      this.showAddPosition = false; this.refreshPositions();
+      this.toast = 'Added'; setTimeout(() => this.toast = '', 1200);
+    },
+    removeFill(f) {
+      // Find matching fill in positions and remove it
+      const idx = this.positions.findIndex(p => p.strike === f.strike && p.side === f.side && p.qty === f.qty && p.avg_price === f.avg_price && (p.broker || '') === (f.broker || '') && (p.demat || '') === (f.demat || ''));
+      if (idx >= 0) {
+        this.positions.splice(idx, 1);
+        localStorage.setItem('positions', JSON.stringify(this.positions));
+        this.refreshPositions();
+      }
+    },
+    removeAggregated(p) {
+      // Single-fill aggregate → just remove it
+      if (!p.fills || p.fills.length === 0) return;
+      if (p.fills.length === 1) { this.removeFill(p.fills[0]); return; }
+      if (!confirm(`Remove all ${p.fills.length} fills for ${p.strike} ${p.side}?`)) return;
+      for (const f of p.fills) this.removeFill(f);
+    },
+    addManualRow() {
+      this.manualRows.push({ instrument: 'SENSEX', strike: null, side: 'CE', qty: null, avg_price: null, broker: '', demat: '' });
+    },
+    importFromManual() {
+      const valid = this.manualRows.filter(r => r.strike && r.qty && r.avg_price);
+      if (valid.length === 0) { this.toast = '× No valid rows'; setTimeout(() => this.toast = '', 2000); return; }
+      const fills = valid.map(r => ({
+        instrument: r.instrument, strike: Number(r.strike), side: r.side,
+        qty: Number(r.qty), avg_price: Number(r.avg_price),
+        broker: r.broker || '', demat: r.demat || '',
+        time: new Date().toISOString().slice(0, 16).replace('T', ' '),
+        note: 'manual',
+      }));
+      if (this.importMode === 'replace') this.positions = [];
+      this.positions.push(...fills);
+      localStorage.setItem('positions', JSON.stringify(this.positions));
+      this.manualRows = [];
+      this.showImport = false;
+      this.refreshPositions();
+      this.toast = `${this.importMode === 'replace' ? 'Replaced with' : 'Added'} ${fills.length}`;
+      setTimeout(() => this.toast = '', 2000);
+    },
+    async importFromJson() {
+      try {
+        const arr = JSON.parse(this.importJsonText);
+        if (!Array.isArray(arr)) throw new Error('Expected array');
+        if (this.importMode === 'replace') this.positions = [];
+        this.positions.push(...arr);
+        localStorage.setItem('positions', JSON.stringify(this.positions));
+        this.importJsonText = ''; this.showImport = false;
+        this.refreshPositions();
+        this.toast = `${this.importMode === 'replace' ? 'Replaced with' : 'Added'} ${arr.length}`; setTimeout(() => this.toast = '', 2000);
+      } catch (e) { this.toast = '× ' + e.message; setTimeout(() => this.toast = '', 3000); }
+    },
+    async importFromSheet() {
+      if (!this.importSheetUrl) { this.importStatus = '× Enter a Sheet URL'; return; }
+      localStorage.setItem('importSheetUrl', this.importSheetUrl);
+      this.importStatus = 'Fetching…';
+      try {
+        const r = await fetch('/api/import/google-sheet', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ url: this.importSheetUrl }) });
+        const j = await r.json();
+        if (j.error) { this.importStatus = '× ' + j.error; return; }
+        if (this.importMode === 'replace') this.positions = [];
+        this.positions.push(...(j.positions || []));
+        localStorage.setItem('positions', JSON.stringify(this.positions));
+        let msg = `✓ Imported ${j.count} positions`;
+        if (j.errors && j.errors.length) msg += ` · ${j.errors.length} row errors (check sheet schema)`;
+        this.importStatus = msg;
+        this.refreshPositions();
+        setTimeout(() => { this.showImport = false; this.importStatus = ''; }, 2500);
+      } catch (e) { this.importStatus = '× ' + e.message; }
+    },
+    expandKey(p) { return `${p.instrument}_${p.strike}_${p.side}_${p.qty < 0 ? 'S' : 'L'}`; },
+    toggleExpand(p) {
+      if (!p.fills || p.fills.length <= 1) return;
+      const k = this.expandKey(p);
+      this.expanded[k] = !this.expanded[k];
+    },
+    loadDemo() {
+      const demo = [
+        {"instrument":"SENSEX","strike":76800,"side":"PE","qty":-1000,"avg_price":8.10},
+        {"instrument":"SENSEX","strike":79100,"side":"CE","qty":-1000,"avg_price":8.35},
+        {"instrument":"SENSEX","strike":75800,"side":"PE","qty":-10080,"avg_price":2.19},
+        {"instrument":"SENSEX","strike":76000,"side":"PE","qty":-11200,"avg_price":2.36},
+        {"instrument":"SENSEX","strike":80000,"side":"CE","qty":-21280,"avg_price":2.41},
+        {"instrument":"SENSEX","strike":76700,"side":"PE","qty":-4000,"avg_price":7.50},
+        {"instrument":"SENSEX","strike":79200,"side":"CE","qty":-4400,"avg_price":7.96},
+        {"instrument":"SENSEX","strike":76000,"side":"PE","qty":-32000,"avg_price":2.42},
+        {"instrument":"SENSEX","strike":80000,"side":"CE","qty":-45000,"avg_price":2.48},
+        {"instrument":"SENSEX","strike":80500,"side":"CE","qty":-3000,"avg_price":5.25},
+      ];
+      this.positions = demo; localStorage.setItem('positions', JSON.stringify(demo));
+      this.refreshPositions();
+      this.toast = `Loaded ${demo.length}`; setTimeout(() => this.toast = '', 1500);
+    },
+
+    bucketOf(p) {
+      const d = Math.abs(p.dist_pct || 0);
+      if ((p.qty || 0) > 0) return 'L';
+      if (d >= 2.5) return 'A'; if (d >= 1.0) return 'B2'; return 'B1';
+    },
+    // Source rows depend on view mode (aggregated vs all fills) and live/historical
+    rawRows() {
+      if (this.view === 'historical') {
+        // Historical snapshots don't have aggregation precomputed → flat list
+        return this.histSnapshot?.analysis || [];
+      }
+      return this.tableView === 'aggregated' ? this.positionsAggregated : this.positionsAnalyzed;
+    },
+    filteredRows() {
+      let arr = this.rawRows() || [];
+      if (this.filterReco === 'action') arr = arr.filter(p => (p.recommendation || '').startsWith('CUT') || p.recommendation === 'BOOK');
+      else if (this.filterReco !== 'all') arr = arr.filter(p => p.recommendation === this.filterReco);
+      if (this.filterBucket !== 'all') arr = arr.filter(p => this.bucketOf(p) === this.filterBucket);
+      if (this.filterInstrument !== 'all') arr = arr.filter(p => p.instrument === this.filterInstrument);
+      const sortFn = {
+        'mtm':     (a,b) => (b.mtm_total || 0) - (a.mtm_total || 0),
+        'strike':  (a,b) => (a.strike || 0) - (b.strike || 0),
+        'lots':    (a,b) => (b.qty_lots || 0) - (a.qty_lots || 0),
+        'cushion': (a,b) => (a.cushion || 0) - (b.cushion || 0),
+        'dist':    (a,b) => Math.abs(a.dist_pct || 0) - Math.abs(b.dist_pct || 0),
+      }[this.sortBy] || ((a,b) => 0);
+      return [...arr].sort(sortFn);
+    },
+    filteredMTM() { return this.filteredRows().reduce((s,p)=>s+(p.mtm_total||0), 0); },
+    filterCount(reco) { return (this.activePositions || []).filter(p => p.recommendation === reco).length; },
+    instCount(inst) { return (this.activePositions || []).filter(p => p.instrument === inst).length; },
+    actionItems() { return (this.activePositions || []).filter(p => (p.recommendation || '').startsWith('CUT') || p.recommendation === 'BOOK'); },
+    groupedByBucket() {
+      const groups = {
+        A:  { label: 'Bucket A · Deep OTM', mtm: 0, legs: 0, lots: 0 },
+        B2: { label: 'Bucket B2 · Mid', mtm: 0, legs: 0, lots: 0 },
+        B1: { label: 'Bucket B1 · ATM', mtm: 0, legs: 0, lots: 0 },
+        L:  { label: 'Lottery / Long', mtm: 0, legs: 0, lots: 0 },
+      };
+      for (const p of this.activePositions) {
+        const k = this.bucketOf(p);
+        groups[k].mtm += p.mtm_total || 0;
+        groups[k].legs += 1;
+        groups[k].lots += p.qty_lots || 0;
+      }
+      return groups;
+    },
+    rowAccent(p) {
+      const r = p.recommendation;
+      if (r === 'CUT_ALL') return 'bg-loss-50/50';
+      if (r === 'CUT_PARTIAL') return 'bg-warn-50/50';
+      return '';
+    },
+    formatINR(v) {
+      if (!v) return '0';
+      const a = Math.abs(v);
+      if (a >= 1e7) return (v/1e7).toFixed(2) + 'Cr';
+      if (a >= 1e5) return (v/1e5).toFixed(2) + 'L';
+      if (a >= 1e3) return (v/1e3).toFixed(0) + 'K';
+      return Math.round(v).toLocaleString();
+    },
+    yieldColor() {
+      const y = this.activeSummary.yield_per_cr ?? 0;
+      if (y >= 5000) return 'text-gain-600';     // hit ideal target
+      if (y >= 3000) return 'text-gain-500';     // above floor
+      if (y >= 1000) return 'text-warn-500';     // below floor, still positive
+      if (y >= 0)    return 'text-[var(--text-1)]';
+      return 'text-loss-600';                    // negative
+    },
+    vixRegime() {
+      const v = this.snapshot?.vix ?? 0;
+      if (v < 13) return 'CALM'; if (v < 16) return 'LOW'; if (v < 18) return 'ELEVATED'; if (v < 22) return 'HIGH'; return 'EXTREME';
+    },
+    vixColorClass() {
+      const v = this.snapshot?.vix ?? 0;
+      if (v >= 22) return 'text-loss-600'; if (v >= 18) return 'text-warn-600'; if (v >= 16) return 'text-warn-500'; return 'text-[var(--text-1)]';
+    },
+    cushColor(c) {
+      if (c >= 3) return 'text-gain-600 font-semibold';
+      if (c >= 2) return 'text-gain-600'; if (c >= 1.5) return 'text-warn-500';
+      if (c >= 1) return 'text-warn-600'; return 'text-loss-600';
+    },
+    recBadge(r) {
+      const m = {
+        'HOLD':'bg-gain-50 text-gain-700 dark:bg-gain-500/10 dark:text-gain-500',
+        'WATCH':'bg-warn-50 text-warn-700 dark:bg-warn-500/10 dark:text-warn-500',
+        'CUT_PARTIAL':'bg-warn-100 text-warn-700 dark:bg-warn-500/20 dark:text-warn-500',
+        'CUT_ALL':'bg-loss-100 text-loss-700 dark:bg-loss-500/20 dark:text-loss-500',
+        'BOOK':'bg-accent-50 text-accent-700 dark:bg-accent-500/10 dark:text-accent-500',
+      };
+      return m[r] || 'bg-[var(--bg)] text-[var(--text-2)]';
+    },
+  };
+}
+</script>
+{% endblock %}
