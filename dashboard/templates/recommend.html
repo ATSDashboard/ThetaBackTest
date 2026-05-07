@@ -182,7 +182,7 @@
                 <input type="number" :value="t.ce.strike" @change="setTierStrike(t.id, 'CE', $event.target.value)" class="w-[88px] px-1 py-0 bg-transparent text-center text-xl font-bold leading-none border-0 focus:outline-none tracking-tight">
                 <button @click="bumpTierStrike(t.id, 'CE', +1)" class="px-1.5 py-0.5 text-[11px] rounded border border-slate-300 dark:border-slate-600 hover:bg-white dark:hover:bg-slate-700 leading-none" title="+1 grid">+</button>
               </div>
-              <div class="num text-xs text-red-700 dark:text-red-400 mt-1" x-text="((t.ce.dist_pct ?? 0) >= 0 ? '+' : '')+(t.ce.dist_pct ?? 0)+'% · '+((t.ce.dist_pts ?? 0) >= 0 ? '+' : '')+(t.ce.dist_pts ?? 0)+' pts'"></div>
+              <div class="num text-xs text-red-700 dark:text-red-400 mt-1" x-text="((t.ce.dist_pct ?? 0) >= 0 ? '+' : '')+(t.ce.dist_pct ?? 0).toFixed(1)+'% · '+((t.ce.dist_pts ?? 0) >= 0 ? '+' : '')+Math.round(t.ce.dist_pts ?? 0)+' pts'"></div>
               <div class="grid grid-cols-2 gap-x-2 gap-y-0.5 text-[11px] num mt-2">
                 <div class="text-slate-500">Δ delta</div><div class="text-right" x-text="t.ce.delta"></div>
                 <div class="text-slate-500">LTP</div><div class="text-right" x-text="'₹' + t.ce.ltp"></div>
@@ -200,7 +200,7 @@
                 <input type="number" :value="t.pe.strike" @change="setTierStrike(t.id, 'PE', $event.target.value)" class="w-[88px] px-1 py-0 bg-transparent text-center text-xl font-bold leading-none border-0 focus:outline-none tracking-tight">
                 <button @click="bumpTierStrike(t.id, 'PE', +1)" class="px-1.5 py-0.5 text-[11px] rounded border border-slate-300 dark:border-slate-600 hover:bg-white dark:hover:bg-slate-700 leading-none" title="+1 grid">+</button>
               </div>
-              <div class="num text-xs text-green-700 dark:text-green-400 mt-1" x-text="(t.pe.dist_pct ?? 0)+'% · '+(t.pe.dist_pts ?? 0)+' pts'"></div>
+              <div class="num text-xs text-green-700 dark:text-green-400 mt-1" x-text="(t.pe.dist_pct ?? 0).toFixed(1)+'% · '+Math.round(t.pe.dist_pts ?? 0)+' pts'"></div>
               <div class="grid grid-cols-2 gap-x-2 gap-y-0.5 text-[11px] num mt-2">
                 <div class="text-slate-500">Δ delta</div><div class="text-right" x-text="t.pe.delta"></div>
                 <div class="text-slate-500">LTP</div><div class="text-right" x-text="'₹' + t.pe.ltp"></div>
@@ -314,7 +314,7 @@
                 <button @click="bumpStrike(li, +1)" class="px-1.5 py-0.5 text-[11px] hover:bg-[var(--bg)] border-l border-[var(--border)]" title="Up 1 grid">+</button>
               </div>
               <span class="text-[10px] font-bold" :class="leg.side === 'CE' ? 'text-loss-600' : 'text-gain-600'" x-text="leg.side"></span>
-              <span class="text-[var(--text-3)] text-[10px]" x-text="'(' + (leg.dist_pct >= 0 ? '+' : '') + leg.dist_pct + '%)'"></span>
+              <span class="text-[var(--text-3)] text-[10px]" x-text="'(' + (leg.dist_pct >= 0 ? '+' : '') + (leg.dist_pct ?? 0).toFixed(1) + '%)'"></span>
               <span class="ml-auto font-semibold" x-text="'₹' + (leg.ltp ?? '—')"></span>
               <!-- Qty editable -->
               <input type="number" min="1" :value="leg.qty_lots" @change="setLots(li, $event.target.value)" class="w-12 px-1 py-0.5 rounded border border-[var(--border)] bg-[var(--surface)] num text-right text-[11px]">
@@ -486,8 +486,8 @@ function recommendApp() {
         t[k].ltp = null;   // unknown — strike out of fetched range
       }
       if (chain?.spot) {
-        t[k].dist_pts = ns - chain.spot;
-        t[k].dist_pct = Number(((ns - chain.spot) / chain.spot * 100).toFixed(2));
+        t[k].dist_pts = Math.round(ns - chain.spot);
+        t[k].dist_pct = Number(((ns - chain.spot) / chain.spot * 100).toFixed(1));
       }
       // Recompute cushion via simple expected_move from VIX (1σ)
       const vix = chain?.vix ?? 17;
