@@ -2321,14 +2321,18 @@ def page_report(request: Request):
     return templates.TemplateResponse(request, "report.html", {})
 
 
-# ── Auto-open in browser ─────────────────────────────────────────────────
-@app.on_event("startup")
-def open_browser_on_start():
-    import webbrowser, threading
-    def _open():
-        time_mod.sleep(1.5)
-        webbrowser.open("http://localhost:8000")
-    threading.Thread(target=_open, daemon=True).start()
+# ── Auto-open in browser (opt-in via THETADESK_AUTOOPEN=1) ──────────────
+# Disabled by default so server restarts during development don't spam tabs.
+# Set the env var to re-enable for the very first launch of the day.
+import os as _os
+if _os.environ.get("THETADESK_AUTOOPEN") == "1":
+    @app.on_event("startup")
+    def open_browser_on_start():
+        import webbrowser, threading
+        def _open():
+            time_mod.sleep(1.5)
+            webbrowser.open("http://localhost:8000")
+        threading.Thread(target=_open, daemon=True).start()
 
 
 if __name__ == "__main__":
