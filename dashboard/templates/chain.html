@@ -294,8 +294,10 @@ function chainPage() {
     sendToReport(replace) {
       if (!this.builder.length) return;
       const lot = this.LOT_SIZE();
+      const expiry = this.data?.expiry || '';
       const fills = this.builder.map(leg => ({
         instrument: this.instrument,
+        expiry,                                // ← carry through from chain context
         strike: leg.strike,
         side: leg.side,
         qty: (leg.action === 'SELL' ? -1 : 1) * leg.qty_lots * lot,

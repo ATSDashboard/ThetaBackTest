@@ -42,6 +42,25 @@
     </div>
   </header>
 
+  <!-- ─── STALE POSITIONS WARNING ─── -->
+  <div x-show="(activeSummary.n_stale ?? 0) > 0" x-cloak
+       class="card mb-5 px-5 py-4 border-warn-500/40"
+       style="background: var(--surface); border-color: rgb(245 158 11 / 0.3);">
+    <div class="flex items-center justify-between gap-4 flex-wrap">
+      <div>
+        <div class="text-[12px] font-bold text-warn-600 mb-1">⚠️ Stale positions detected</div>
+        <div class="text-[12px] text-[var(--text-2)]">
+          <strong x-text="activeSummary.n_stale"></strong> positions are being priced against the <strong>next weekly expiry's chain</strong> — they're likely from a past expiry that already settled.
+          MTM, margin and yield numbers are <strong>NOT meaningful</strong> until you clear them.
+        </div>
+      </div>
+      <div class="flex gap-2 shrink-0">
+        <button @click="clearAllPositions()" class="px-4 py-1.5 rounded-md text-[12px] font-bold bg-warn-500 text-white hover:bg-warn-600">Clear all positions</button>
+        <button @click="saveDay()" class="px-3 py-1.5 rounded-md text-[12px] font-medium border border-[var(--border)] hover:bg-[var(--bg)]">Save first then clear</button>
+      </div>
+    </div>
+  </div>
+
   <!-- ─── KPI STRIP: live P&L · max profit · margin used · capture% ─── -->
   <div class="card mb-5 grid grid-cols-2 md:grid-cols-4 divide-x divide-[var(--border)]" x-show="activePositions.length > 0">
     <!-- Live P&L -->
@@ -147,6 +166,7 @@
           <thead>
             <tr class="bg-[var(--bg)]">
               <th class="text-left px-4 py-3 text-[10px] font-bold uppercase tracking-wider text-[var(--text-3)] border-b border-[var(--border)]">Instrument</th>
+              <th class="text-left px-3 py-3 text-[10px] font-bold uppercase tracking-wider text-[var(--text-3)] border-b border-[var(--border)] hidden lg:table-cell">Expiry</th>
               <th class="text-left px-3 py-3 text-[10px] font-bold uppercase tracking-wider text-[var(--text-3)] border-b border-[var(--border)]">Strike</th>
               <th class="text-center px-2 py-3 text-[10px] font-bold uppercase tracking-wider text-[var(--text-3)] border-b border-[var(--border)]">Type</th>
               <th class="text-right px-3 py-3 text-[10px] font-bold uppercase tracking-wider text-[var(--text-3)] border-b border-[var(--border)]">Lots</th>
@@ -169,7 +189,9 @@
                     <td class="px-4 py-3 font-medium text-[12px] text-[var(--text-2)]">
                       <span x-text="p.instrument"></span>
                       <span x-show="(p.n_fills || 1) > 1" class="ml-1 text-[var(--text-3)] text-[10px]">▶</span>
+                      <span x-show="p.is_expired" class="ml-1 px-1 rounded text-[9px] font-bold bg-loss-100 text-loss-700">EXPIRED</span>
                     </td>
+                    <td class="px-3 py-3 num text-[11px] text-[var(--text-3)] hidden lg:table-cell" x-text="p.expiry || '—'"></td>
                     <td class="px-3 py-3"><span class="font-bold text-[14px] tracking-tight" x-text="p.strike"></span></td>
                     <td class="px-2 py-3 text-center">
                       <span class="px-2 py-0.5 rounded text-[10px] font-bold" :class="p.side === 'CE' ? 'bg-loss-50 text-loss-700 dark:bg-loss-500/10' : 'bg-gain-50 text-gain-700 dark:bg-gain-500/10'" x-text="p.side"></span>
@@ -198,6 +220,7 @@
                     <template x-for="(f, fi) in p.fills" :key="fi">
                       <tr class="bg-[var(--bg)]/40 border-b border-[var(--border)]">
                         <td class="pl-10 pr-2 py-2 text-[11px] text-[var(--text-3)] num" x-text="f.broker || '—'"></td>
+                        <td class="px-3 py-2 text-[10px] text-[var(--text-3)] num hidden lg:table-cell" x-text="f.expiry || '—'"></td>
                         <td class="px-3 py-2 text-[11px] text-[var(--text-3)] num" x-text="f.demat || '—'"></td>
                         <td class="px-2 py-2"></td>
                         <td class="px-3 py-2 text-right text-[11px] num" :class="f.qty < 0 ? 'text-loss-500' : 'text-gain-500'" x-text="(f.qty<0?'−':'+') + (Math.abs(f.qty) / (f.instrument === 'NIFTY' ? 75 : 20))"></td>
@@ -221,7 +244,7 @@
           <!-- Footer: totals -->
           <tfoot>
             <tr class="bg-[var(--bg)] font-semibold">
-              <td colspan="3" class="px-4 py-3 text-[10px] uppercase tracking-wider text-[var(--text-3)]">Total · <span x-text="filteredRows().length"></span> rows</td>
+              <td colspan="4" class="px-4 py-3 text-[10px] uppercase tracking-wider text-[var(--text-3)]">Total · <span x-text="filteredRows().length"></span> rows</td>
               <td class="px-3 py-3 text-right num text-[var(--text-2)]" x-text="filteredRows().reduce((s,p)=>s+(p.qty_lots ?? 0)*(p.qty<0?-1:1),0)"></td>
               <td colspan="4"></td>
               <td class="px-4 py-3 text-right font-bold num" :class="filteredMTM() >= 0 ? 'text-gain-600' : 'text-loss-600'" x-text="(filteredMTM()>=0?'+₹':'−₹')+Math.abs(filteredMTM()).toLocaleString()"></td>
@@ -330,7 +353,9 @@
       </div>
       <div class="grid grid-cols-2 gap-3 text-[12px]">
         <div><label class="text-[10px] text-[var(--text-3)] uppercase tracking-wider">Instrument</label>
-          <select x-model="newPos.instrument" class="w-full mt-1 px-2.5 py-1.5 rounded-md border border-[var(--border)] bg-[var(--surface)]"><option value="SENSEX">SENSEX</option><option value="NIFTY">NIFTY</option></select></div>
+          <select x-model="newPos.instrument" @change="newPos.expiry = nextExpiries[newPos.instrument] || ''" class="w-full mt-1 px-2.5 py-1.5 rounded-md border border-[var(--border)] bg-[var(--surface)]"><option value="SENSEX">SENSEX</option><option value="NIFTY">NIFTY</option></select></div>
+        <div><label class="text-[10px] text-[var(--text-3)] uppercase tracking-wider">Expiry · YYYY-MM-DD</label>
+          <input type="date" x-model="newPos.expiry" class="w-full mt-1 px-2.5 py-1.5 rounded-md border border-[var(--border)] bg-[var(--surface)] num" :placeholder="nextExpiries[newPos.instrument] || 'next weekly'"></div>
         <div><label class="text-[10px] text-[var(--text-3)] uppercase tracking-wider">Strike</label>
           <input type="number" x-model.number="newPos.strike" class="w-full mt-1 px-2.5 py-1.5 rounded-md border border-[var(--border)] bg-[var(--surface)] num" placeholder="80000"></div>
         <div><label class="text-[10px] text-[var(--text-3)] uppercase tracking-wider">Side</label>
@@ -379,6 +404,7 @@
             <thead class="text-[10px] uppercase text-[var(--text-3)] font-semibold">
               <tr>
                 <th class="text-left p-1.5">Inst</th>
+                <th class="text-left p-1.5">Expiry</th>
                 <th class="text-right p-1.5">Strike</th>
                 <th class="text-left p-1.5">Side</th>
                 <th class="text-right p-1.5">Qty</th>
@@ -391,7 +417,8 @@
             <tbody>
               <template x-for="(row, i) in manualRows" :key="i">
                 <tr class="border-t border-[var(--border)]">
-                  <td class="p-1"><select x-model="row.instrument" class="px-1 py-1 rounded border border-[var(--border)] bg-[var(--surface)] text-[11px] w-20"><option value="SENSEX">SENSEX</option><option value="NIFTY">NIFTY</option></select></td>
+                  <td class="p-1"><select x-model="row.instrument" @change="row.expiry = nextExpiries[row.instrument] || ''" class="px-1 py-1 rounded border border-[var(--border)] bg-[var(--surface)] text-[11px] w-20"><option value="SENSEX">SENSEX</option><option value="NIFTY">NIFTY</option></select></td>
+                  <td class="p-1"><input type="date" x-model="row.expiry" class="w-28 px-1 py-1 rounded border border-[var(--border)] bg-[var(--surface)] num text-[10px]"></td>
                   <td class="p-1"><input type="number" x-model.number="row.strike" placeholder="80000" class="w-20 px-1 py-1 rounded border border-[var(--border)] bg-[var(--surface)] num text-right"></td>
                   <td class="p-1"><select x-model="row.side" class="px-1 py-1 rounded border border-[var(--border)] bg-[var(--surface)] text-[11px] w-14"><option value="CE">CE</option><option value="PE">PE</option></select></td>
                   <td class="p-1"><input type="number" x-model.number="row.qty" placeholder="-1000" class="w-20 px-1 py-1 rounded border border-[var(--border)] bg-[var(--surface)] num text-right"></td>
@@ -496,7 +523,8 @@ function reportApp() {
     manualRows: [],   // [{instrument, strike, side, qty, avg_price, broker, demat}, ...]
     expanded: {},             // expandKey() → bool
     tableView: 'aggregated',  // 'aggregated' | 'all'
-    newPos: { instrument: 'SENSEX', strike: 0, side: 'CE', dir: '-1', qty_abs: 0, avg_price: 0, broker: '', demat: '', note: '' },
+    newPos: { instrument: 'SENSEX', strike: 0, side: 'CE', dir: '-1', qty_abs: 0, avg_price: 0, broker: '', demat: '', note: '', expiry: '' },
+    nextExpiries: { SENSEX: '', NIFTY: '' },   // populated from chain context
     filterReco: 'all', filterBucket: 'all', filterInstrument: 'all',
     sortBy: 'mtm',
     toast: '',
@@ -520,6 +548,10 @@ function reportApp() {
         this.snapshot = snap;
         this.contexts.SENSEX = sCtx;
         this.contexts.NIFTY = nCtx;
+        this.nextExpiries.SENSEX = sCtx?.expiry || '';
+        this.nextExpiries.NIFTY  = nCtx?.expiry || '';
+        // Default newPos.expiry to next weekly for the chosen instrument
+        if (!this.newPos.expiry) this.newPos.expiry = this.nextExpiries[this.newPos.instrument] || '';
         await this.refreshPositions();
       } catch (e) { console.error(e); }
     },
@@ -577,14 +609,15 @@ function reportApp() {
         this.toast = '× Fill all fields'; setTimeout(() => this.toast = '', 2000); return;
       }
       const qty = Number(this.newPos.qty_abs) * Number(this.newPos.dir);
-      const fill = { instrument: this.newPos.instrument, strike: this.newPos.strike, side: this.newPos.side, qty, avg_price: this.newPos.avg_price };
+      const expiry = this.newPos.expiry || this.nextExpiries[this.newPos.instrument] || '';
+      const fill = { instrument: this.newPos.instrument, expiry, strike: this.newPos.strike, side: this.newPos.side, qty, avg_price: this.newPos.avg_price };
       if (this.newPos.broker) fill.broker = this.newPos.broker;
       if (this.newPos.demat) fill.demat = this.newPos.demat;
       if (this.newPos.note) fill.note = this.newPos.note;
       fill.time = new Date().toISOString().slice(0, 16).replace('T', ' ');
       this.positions.push(fill);
       localStorage.setItem('positions', JSON.stringify(this.positions));
-      this.newPos = { instrument: 'SENSEX', strike: 0, side: 'CE', dir: '-1', qty_abs: 0, avg_price: 0, broker: '', demat: '', note: '' };
+      this.newPos = { instrument: this.newPos.instrument, expiry: this.nextExpiries[this.newPos.instrument] || '', strike: 0, side: 'CE', dir: '-1', qty_abs: 0, avg_price: 0, broker: '', demat: '', note: '' };
       this.showAddPosition = false; this.refreshPositions();
       this.toast = 'Added'; setTimeout(() => this.toast = '', 1200);
     },
@@ -604,14 +637,23 @@ function reportApp() {
       if (!confirm(`Remove all ${p.fills.length} fills for ${p.strike} ${p.side}?`)) return;
       for (const f of p.fills) this.removeFill(f);
     },
+    clearAllPositions() {
+      if (!confirm('Clear ALL tracked positions?')) return;
+      this.positions = []; localStorage.setItem('positions', '[]');
+      this.positionsAnalyzed = []; this.positionsAggregated = []; this.posSummary = {};
+      this.toast = '✓ Cleared'; setTimeout(() => this.toast = '', 1500);
+    },
     addManualRow() {
-      this.manualRows.push({ instrument: 'SENSEX', strike: null, side: 'CE', qty: null, avg_price: null, broker: '', demat: '' });
+      const inst = 'SENSEX';
+      this.manualRows.push({ instrument: inst, expiry: this.nextExpiries[inst] || '', strike: null, side: 'CE', qty: null, avg_price: null, broker: '', demat: '' });
     },
     importFromManual() {
       const valid = this.manualRows.filter(r => r.strike && r.qty && r.avg_price);
       if (valid.length === 0) { this.toast = '× No valid rows'; setTimeout(() => this.toast = '', 2000); return; }
       const fills = valid.map(r => ({
-        instrument: r.instrument, strike: Number(r.strike), side: r.side,
+        instrument: r.instrument,
+        expiry: r.expiry || this.nextExpiries[r.instrument] || '',
+        strike: Number(r.strike), side: r.side,
         qty: Number(r.qty), avg_price: Number(r.avg_price),
         broker: r.broker || '', demat: r.demat || '',
         time: new Date().toISOString().slice(0, 16).replace('T', ' '),

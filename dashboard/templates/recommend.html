@@ -507,8 +507,11 @@ function recommendApp() {
     sendPresetToReport(replace) {
       if (!this.genResult || !this.genResult.legs.length) return;
       const lot = this.LOT_SIZE();
+      const expiry = this.chainData?.expiry || this.d?.context?.expiry || '';
       const fills = this.genResult.legs.map(leg => ({
-        instrument: this.instrument, strike: leg.strike, side: leg.side,
+        instrument: this.instrument,
+        expiry,                                  // ← carry through from chain context
+        strike: leg.strike, side: leg.side,
         qty: (leg.action === 'SELL' ? -1 : 1) * leg.qty_lots * lot,
         avg_price: leg.ltp,
         broker: 'preset',

@@ -14,16 +14,17 @@ The team updates a single Sheet throughout the day. The dashboard fetches it on 
 
 Create a Google Sheet with **these exact headers in row 1** (case-insensitive):
 
-| instrument | strike | side | qty   | price | broker  | demat  | time             | note            |
-|------------|--------|------|-------|-------|---------|--------|------------------|-----------------|
-| SENSEX     | 80000  | CE   | -21280| 2.41  | Monarch | M-001  | 2026-05-07 09:30 | Bucket A · Deep |
-| SENSEX     | 80000  | CE   | -45000| 2.48  | Axis    | A-001  | 2026-05-07 09:32 | Bucket A · Deep |
-| SENSEX     | 76000  | PE   | -32000| 2.42  | Axis    | A-001  | 2026-05-07 09:33 | Bucket A · Deep |
-| SENSEX     | 79100  | CE   | -1000 | 8.35  | Axis    | A-002  | 2026-05-07 14:00 | Mid Risk        |
-| SENSEX     | 82500  | CE   | +500  | 0.45  | Monarch | M-001  | 2026-05-07 14:25 | Lottery harvest |
+| instrument | expiry     | strike | side | qty   | price | broker  | demat  | time             | note            |
+|------------|------------|--------|------|-------|-------|---------|--------|------------------|-----------------|
+| SENSEX     | 2026-05-07 | 80000  | CE   | -21280| 2.41  | Monarch | M-001  | 2026-05-07 09:30 | Bucket A · Deep |
+| SENSEX     | 2026-05-07 | 80000  | CE   | -45000| 2.48  | Axis    | A-001  | 2026-05-07 09:32 | Bucket A · Deep |
+| SENSEX     | 2026-05-07 | 76000  | PE   | -32000| 2.42  | Axis    | A-001  | 2026-05-07 09:33 | Bucket A · Deep |
+| SENSEX     | 2026-05-14 | 79100  | CE   | -1000 | 8.35  | Axis    | A-002  | 2026-05-13 14:00 | Mid Risk        |
+| SENSEX     | 2026-05-07 | 82500  | CE   | +500  | 0.45  | Monarch | M-001  | 2026-05-07 14:25 | Lottery harvest |
 
 ### Field rules
 - **instrument** — `SENSEX` or `NIFTY` (case-insensitive)
+- **expiry** — `YYYY-MM-DD` of the option expiry. **Required to avoid mispricing against the wrong week's chain.** If left blank, defaults to next weekly (legacy).
 - **strike** — integer (e.g. `80000`)
 - **side** — `CE` or `PE`
 - **qty** — **negative for SHORT** (sells), **positive for LONG** (buys). Total shares, not lots.

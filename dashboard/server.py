@@ -800,6 +800,7 @@ async def import_google_sheet(request: Request):
             positions.append({
                 "instrument": inst, "strike": strike, "side": side,
                 "qty": qty, "avg_price": price,
+                "expiry": n(row, "expiry", ""),       # YYYY-MM-DD
                 "broker": n(row, "broker", ""),
                 "demat":  n(row, "demat",  ""),
                 "time":   n(row, "time",   ""),
@@ -829,20 +830,53 @@ async def position_analysis(request: Request):
     if not positions:
         return {"positions": [], "summary": {"total_mtm": 0, "total_qty": 0, "n": 0}}
 
-    # Group by instrument so we fetch chains once each
-    by_inst = {}
+    # Group by (instrument, expiry) so we fetch the RIGHT chain per group.
+    # Positions without expiry default to next weekly (legacy behavior).
+    from lib.expiry_calendar import nearest_weekly_expiry_after as _next_wkly
+    today_d = datetime.now(IST).date()
+    by_group = {}     # {(inst, expiry_str): [positions...]}
     for p in positions:
         inst = (p.get("instrument") or "SENSEX").upper()
-        by_inst.setdefault(inst, []).append(p)
+        exp = p.get("expiry") or ""
+        if not exp:
+            # Legacy: default to next weekly for the instrument
+            nx = _next_wkly(today_d, inst)
+            exp = nx.isoformat() if nx else ""
+        by_group.setdefault((inst, exp), []).append(p)
 
-    # Per-instrument context (for spot, walls, max_pain)
-    contexts = {}
-    for inst in by_inst:
+    # Per-(instrument, expiry) chain fetch — but skip already-expired groups
+    # (no point hitting the API for an expiry that's past).
+    contexts = {}     # {(inst, expiry_str): chain_dict}
+    for (inst, exp_str) in by_group:
         if inst not in ("NIFTY", "SENSEX"): continue
         try:
-            d = _fetch_chain_full(inst, distance_pct=8.0)
+            from datetime import datetime as _dt
+            exp_d = _dt.strptime(exp_str, "%Y-%m-%d").date() if exp_str else None
+        except Exception:
+            exp_d = None
+        if exp_d and exp_d < today_d:
+            # Past expiry — assume worthless; build minimal context
+            contexts[(inst, exp_str)] = {
+                "expired": True,
+                "expiry": exp_str,
+                "spot": 0,
+                "vix": 0,
+                "max_pain": None,
+                "max_pain_pct_from_spot": 0,
+                "dte": (exp_d - today_d).days,
+                "is_e0": False,
+                "is_e1": False,
+                "prices": {},
+                "ce_walls": [],
+                "pe_walls": [],
+                "spot_chg_pct": 0,
+                "vix_chg_pct": 0,
+            }
+            continue
+        try:
+            d = _fetch_chain_full(inst, distance_pct=8.0, expiry=exp_str or None)
             if "error" not in d:
-                contexts[inst] = d
+                contexts[(inst, exp_str)] = d
         except Exception:
             pass
 
@@ -855,11 +889,52 @@ async def position_analysis(request: Request):
         qty = int(p.get("qty", 0))
         avg_price = float(p.get("avg_price", 0))
         if not strike or not qty: continue
-        ctx = contexts.get(inst)
+
+        # Resolve expiry for this position
+        pos_exp_str = p.get("expiry") or ""
+        if not pos_exp_str:
+            nx = _next_wkly(today_d, inst)
+            pos_exp_str = nx.isoformat() if nx else ""
+        ctx = contexts.get((inst, pos_exp_str))
+
         if not ctx:
             out.append({"instrument": inst, "strike": strike, "side": side, "qty": qty,
-                        "avg_price": avg_price, "error": "no live context for instrument"})
+                        "avg_price": avg_price, "expiry": pos_exp_str,
+                        "error": "no live context for this instrument/expiry"})
             continue
+
+        # ── Past-expiry: assume worthless, compute realized P&L ──
+        if ctx.get("expired"):
+            ltp = 0.0
+            if qty < 0:
+                mtm_per_share = avg_price       # SHORT kept full premium
+            else:
+                mtm_per_share = -avg_price      # LONG lost full premium
+            mtm_total = round(mtm_per_share * abs(qty), 2)
+            total_mtm += mtm_total
+            lot_size = LOT_SIZE[inst]
+            qty_lots = abs(qty) // lot_size
+            margin_used = 0   # no live margin on settled positions
+            max_profit_at_expiry = round(avg_price * abs(qty), 2) if qty < 0 else 0
+            premium_paid = round(avg_price * qty, 2) if qty > 0 else 0
+            out.append({
+                "instrument": inst, "strike": strike, "side": side, "qty": qty,
+                "qty_lots": qty_lots, "avg_price": avg_price, "ltp": 0.0,
+                "expiry": pos_exp_str, "is_expired": True, "is_settled": True,
+                "spot": 0, "dist_pts": 0, "dist_pct": 0, "cushion": 0,
+                "mtm_per_share": round(mtm_per_share, 2), "mtm_total": mtm_total,
+                "margin_used": 0,
+                "max_profit_at_expiry": max_profit_at_expiry,
+                "premium_paid": premium_paid,
+                "recommendation": "EXPIRED",
+                "rec_reason": f"Expired {pos_exp_str} — assumed worthless",
+                "exit_suggestion": None, "max_pain": None,
+                "dte": ctx["dte"], "is_stale": False, "stale_reason": "",
+                "broker": p.get("broker") or "", "demat": p.get("demat") or "",
+                "time": p.get("time") or "", "note": p.get("note") or "",
+            })
+            continue
+
         prices = ctx["prices"]
         spot = ctx["spot"]
         max_pain = ctx["max_pain"]
@@ -868,7 +943,8 @@ async def position_analysis(request: Request):
         ltp = (prices.get((strike, side), {}) or {}).get("ltp")
         if ltp is None:
             out.append({"instrument": inst, "strike": strike, "side": side, "qty": qty,
-                        "avg_price": avg_price, "error": "strike not in chain"})
+                        "avg_price": avg_price, "expiry": pos_exp_str,
+                        "error": "strike not in chain (out of fetched range)"})
             continue
         # MTM. SHORT (qty<0): profit = (avg - ltp) * |qty|
         if qty < 0:
@@ -957,6 +1033,18 @@ async def position_analysis(request: Request):
         elif recommendation == "BOOK":
             exit_suggestion = round(ltp * 0.95, 2)
 
+        # ── Staleness detection ──
+        # If LTP is wildly different from avg (10× or more), the position is
+        # likely from a past expiry being mispriced against the next weekly chain.
+        # Mark as STALE so the UI can prompt user to clear.
+        is_stale = False
+        stale_reason = ""
+        if avg_price > 0 and ltp is not None:
+            ratio = ltp / avg_price if avg_price > 0 else 1
+            if ratio >= 10 or ratio <= 0.05:
+                is_stale = True
+                stale_reason = f"LTP ₹{ltp} vs avg ₹{avg_price} — likely past-expiry position priced against new chain"
+
         # Margin / max profit / premium paid (for portfolio-level metrics)
         lot_size = LOT_SIZE[inst]
         margin_per_lot = MARGIN_PER_LOT_E0[inst]
@@ -992,6 +1080,11 @@ async def position_analysis(request: Request):
             "exit_suggestion": exit_suggestion,
             "max_pain": max_pain,
             "dte": dte,
+            "is_stale": is_stale,
+            "stale_reason": stale_reason,
+            "expiry": pos_exp_str,
+            "is_expired": False,
+            "is_settled": False,
             # Optional fill-level metadata (passed through from input):
             "broker": p.get("broker") or "",
             "demat":  p.get("demat") or "",
@@ -1074,6 +1167,8 @@ async def position_analysis(request: Request):
     yield_per_cr_now    = round(total_mtm        / total_margin * 1e7) if total_margin > 0 else 0
     yield_per_cr_at_exp = round(total_max_profit / total_margin * 1e7) if total_margin > 0 else 0
 
+    n_stale = sum(1 for p in out if p.get("is_stale"))
+    n_expired = sum(1 for p in out if p.get("is_expired"))
     return {
         "positions": out,
         "aggregated": aggregated,
@@ -1083,6 +1178,8 @@ async def position_analysis(request: Request):
             "n_short": n_short,
             "n_long": n_long,
             "n_action_needed": cuts,
+            "n_stale": n_stale,
+            "n_expired": n_expired,
             "total_margin": total_margin,                          # ← netted (broker-realistic)
             "total_margin_netted": round(total_margin_netted, 2),  # max-side estimate
             "total_margin_naked": round(total_margin_naked, 2),    # naked sum (worst-case)
@@ -1296,8 +1393,12 @@ def vix_regime(vix: float) -> dict:
 
 
 # ── Helper: fetch chain in wider range with all data ────────────────────
-def _fetch_chain_full(instrument: str, distance_pct: float = 8.0) -> dict:
-    """Returns dict with spot, expiry, vix, max_pain, oi_pcr, walls, prices map."""
+def _fetch_chain_full(instrument: str, distance_pct: float = 8.0, expiry=None) -> dict:
+    """Returns dict with spot, expiry, vix, max_pain, oi_pcr, walls, prices map.
+
+    If `expiry` is given (date or 'YYYY-MM-DD' string), pulls chain for THAT
+    specific expiry. Otherwise defaults to nearest weekly after today.
+    """
     from lib.kite_live import _kite, _instruments
     from lib.expiry_calendar import nearest_weekly_expiry_after, is_e0, is_e1
     k = _kite()
@@ -1312,10 +1413,21 @@ def _fetch_chain_full(instrument: str, distance_pct: float = 8.0) -> dict:
     vix_chg_pct = (vix - vix_prev) / vix_prev * 100 if vix_prev else 0
     grid = GRID[instrument]
     today = datetime.now(IST).date()
-    next_exp = nearest_weekly_expiry_after(today, instrument)
+    # Resolve expiry: explicit > nearest weekly default
+    if expiry:
+        if isinstance(expiry, str):
+            try:
+                from datetime import datetime as _dt
+                next_exp = _dt.strptime(expiry, "%Y-%m-%d").date()
+            except Exception:
+                next_exp = nearest_weekly_expiry_after(today, instrument)
+        else:
+            next_exp = expiry
+    else:
+        next_exp = nearest_weekly_expiry_after(today, instrument)
     if not next_exp:
         return {"error": "no_expiry"}
-    dte = max((next_exp - today).days, 0)
+    dte = (next_exp - today).days   # may be negative for past expiries
 
     seg = "NFO" if instrument == "NIFTY" else "BFO"
     instr_dump = pd.DataFrame(_instruments() if instrument == "NIFTY" else k.instruments(seg))
