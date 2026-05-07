@@ -264,9 +264,23 @@
           <h3 class="text-[14px] font-semibold tracking-tight" x-text="genResult?.preset?.label"></h3>
           <div class="text-[11px] text-[var(--text-3)] mt-0.5" x-text="genResult?.preset?.notes"></div>
         </div>
-        <div class="flex items-center gap-2">
-          <span class="text-[10px] uppercase tracking-wider text-[var(--text-3)]">Timing</span>
-          <span class="px-2 py-0.5 rounded text-[11px] font-semibold bg-[var(--bg)] text-[var(--text-2)]" x-text="genResult?.preset?.timing"></span>
+        <div class="flex items-center gap-3 flex-wrap">
+          <!-- Expiry selector -->
+          <div class="flex items-center gap-1.5 text-[11px]">
+            <label class="uppercase text-[var(--text-3)] tracking-wider">Expiry</label>
+            <select x-model="genResult.expiry" @change="changeExpiry()" class="px-2 py-1 rounded-md border border-[var(--border)] bg-[var(--surface)] text-[11px] num">
+              <template x-for="exp in availableExpiries()" :key="exp">
+                <option :value="exp" x-text="exp"></option>
+              </template>
+            </select>
+          </div>
+          <!-- Reset button -->
+          <button @click="resetToRecommended()" class="text-[11px] px-2 py-1 rounded border border-[var(--border)] hover:bg-[var(--bg)]" title="Reset to auto-recommended strikes & expiry">↺ Reset</button>
+          <!-- Timing -->
+          <div class="flex items-center gap-1.5">
+            <span class="text-[10px] uppercase tracking-wider text-[var(--text-3)]">Timing</span>
+            <span class="px-2 py-0.5 rounded text-[11px] font-semibold bg-[var(--bg)] text-[var(--text-2)]" x-text="genResult?.preset?.timing"></span>
+          </div>
         </div>
       </div>
 
@@ -275,14 +289,21 @@
         <!-- Left: legs -->
         <div class="p-5 space-y-3">
           <div class="text-[10px] uppercase tracking-wider text-[var(--text-3)] font-semibold mb-2">Legs</div>
-          <template x-for="leg in genResult?.legs ?? []" :key="leg.strike + '_' + leg.side + '_' + leg.action">
-            <div class="flex items-center gap-2.5 num text-[13px]">
-              <span class="px-2 py-0.5 rounded text-[10px] font-bold" :class="leg.action === 'SELL' ? 'bg-loss-50 text-loss-700' : 'bg-gain-50 text-gain-700'" x-text="leg.action"></span>
-              <span class="font-bold tracking-tight text-[14px]" x-text="leg.strike"></span>
+          <template x-for="(leg, li) in genResult?.legs ?? []" :key="li">
+            <div class="flex items-center gap-2 num text-[13px]">
+              <span class="px-2 py-0.5 rounded text-[10px] font-bold w-12 text-center" :class="leg.action === 'SELL' ? 'bg-loss-50 text-loss-700' : 'bg-gain-50 text-gain-700'" x-text="leg.action"></span>
+              <!-- Strike with up/down arrows -->
+              <div class="flex items-center border border-[var(--border)] rounded">
+                <button @click="bumpStrike(li, -1)" class="px-1.5 py-0.5 text-[11px] hover:bg-[var(--bg)] border-r border-[var(--border)]" title="Down 1 grid">−</button>
+                <input type="number" :value="leg.strike" @change="setStrike(li, $event.target.value)" class="w-20 px-1.5 py-0.5 bg-transparent text-center font-bold tracking-tight text-[13px] num border-0 focus:outline-none">
+                <button @click="bumpStrike(li, +1)" class="px-1.5 py-0.5 text-[11px] hover:bg-[var(--bg)] border-l border-[var(--border)]" title="Up 1 grid">+</button>
+              </div>
               <span class="text-[10px] font-bold" :class="leg.side === 'CE' ? 'text-loss-600' : 'text-gain-600'" x-text="leg.side"></span>
-              <span class="text-[var(--text-3)]" x-text="'(' + (leg.dist_pct >= 0 ? '+' : '') + leg.dist_pct + '%)'"></span>
-              <span class="ml-auto font-semibold" x-text="'₹' + leg.ltp"></span>
-              <span class="text-[10px] text-[var(--text-3)]" x-text="'×' + leg.qty_lots + 'L'"></span>
+              <span class="text-[var(--text-3)] text-[10px]" x-text="'(' + (leg.dist_pct >= 0 ? '+' : '') + leg.dist_pct + '%)'"></span>
+              <span class="ml-auto font-semibold" x-text="'₹' + (leg.ltp ?? '—')"></span>
+              <!-- Qty editable -->
+              <input type="number" min="1" :value="leg.qty_lots" @change="setLots(li, $event.target.value)" class="w-12 px-1 py-0.5 rounded border border-[var(--border)] bg-[var(--surface)] num text-right text-[11px]">
+              <span class="text-[9px] text-[var(--text-3)]">L</span>
             </div>
           </template>
           <div class="border-t border-[var(--border)] pt-3 mt-3 space-y-1.5 text-[12px]">
@@ -359,6 +380,8 @@ function recommendApp() {
     toast: '',
     capitalCr: 100,
     chainData: null,
+    chainsByExpiry: {},   // {expiry: chainData} for switching expiries inside a preset
+    expiriesList: [],     // list of available weekly expiries for the instrument
     genResult: null,
 
     // Strategy presets per Section 9T (canonical Navin Group rulebook)
@@ -394,12 +417,115 @@ function recommendApp() {
     },
     async refresh() {
       try {
-        const [reco, chain] = await Promise.all([
+        const [reco, chain, expiries] = await Promise.all([
           fetch(`/api/recommendations/${this.instrument}?capital_cr=${this.capitalCr}`).then(r => r.json()),
           fetch(`/api/chain/${this.instrument}?distance_pct=8`).then(r => r.json()),
+          fetch('/api/expiries').then(r => r.json()).catch(() => null),
         ]);
         this.d = reco; this.chainData = chain;
+        if (chain?.expiry) this.chainsByExpiry[chain.expiry] = chain;
+        this.expiriesList = (expiries?.[this.instrument] ?? []).map(e => e.date);
       } catch(e) { console.error(e); }
+    },
+    availableExpiries() {
+      // Return union of next 3 weekly + currently selected
+      const base = [...this.expiriesList];
+      if (this.genResult?.expiry && !base.includes(this.genResult.expiry)) base.push(this.genResult.expiry);
+      return base;
+    },
+    async changeExpiry() {
+      if (!this.genResult) return;
+      const exp = this.genResult.expiry;
+      // Fetch chain for this expiry if not cached
+      if (!this.chainsByExpiry[exp]) {
+        this.toast = 'Loading ' + exp + '…';
+        try {
+          // Use position-analysis-style approach — call /api/chain with expiry param
+          // Currently /api/chain doesn't accept expiry; fall back to default chain for now
+          const r = await fetch(`/api/chain/${this.instrument}?distance_pct=8`);
+          const j = await r.json();
+          this.chainsByExpiry[exp] = j;
+        } catch(e) { this.toast = '× ' + e.message; setTimeout(() => this.toast = '', 2000); return; }
+      }
+      // Re-lookup LTPs for current legs against the new expiry's chain
+      const chain = this.chainsByExpiry[exp];
+      for (const leg of this.genResult.legs) {
+        const row = (chain?.rows ?? []).find(r => r.strike === leg.strike);
+        leg.ltp = (leg.side === 'CE' ? row?.ce_ltp : row?.pe_ltp) ?? leg.ltp;
+        if (chain?.spot) leg.dist_pct = Number(((leg.strike - chain.spot) / chain.spot * 100).toFixed(2));
+      }
+      this.recomputeGenMetrics();
+      this.toast = `Expiry → ${exp}`; setTimeout(() => this.toast = '', 1500);
+    },
+    bumpStrike(legIdx, dir) {
+      const leg = this.genResult?.legs?.[legIdx]; if (!leg) return;
+      const grid = (this.instrument === 'NIFTY') ? 50 : 100;
+      this.setStrike(legIdx, leg.strike + dir * grid);
+    },
+    setStrike(legIdx, newStrike) {
+      const leg = this.genResult?.legs?.[legIdx]; if (!leg) return;
+      const ns = Number(newStrike);
+      if (!ns) return;
+      leg.strike = ns;
+      // Look up new LTP from chain
+      const chain = this.chainsByExpiry[this.genResult.expiry] || this.chainData;
+      const row = (chain?.rows ?? []).find(r => r.strike === ns);
+      if (row) {
+        const newLtp = leg.side === 'CE' ? row.ce_ltp : row.pe_ltp;
+        if (newLtp != null) leg.ltp = newLtp;
+        if (chain?.spot) leg.dist_pct = Number(((ns - chain.spot) / chain.spot * 100).toFixed(2));
+      }
+      this.recomputeGenMetrics();
+    },
+    setLots(legIdx, newLots) {
+      const leg = this.genResult?.legs?.[legIdx]; if (!leg) return;
+      const n = Math.max(1, Number(newLots) || 1);
+      leg.qty_lots = n;
+      this.recomputeGenMetrics();
+    },
+    resetToRecommended() {
+      if (!this.genResult?.key) return;
+      this.genPreset(this.genResult.key);   // re-run the preset → restores recommended state
+      this.toast = '↺ Reset to recommended'; setTimeout(() => this.toast = '', 1500);
+    },
+    recomputeGenMetrics() {
+      // Recompute combined premium, margin, max_profit, breakevens, yield/Cr
+      // using the (possibly edited) genResult.legs array
+      if (!this.genResult || !this.genResult.legs.length) return;
+      const lot = this.LOT_SIZE();
+      const margin = this.MARGIN_PER_LOT();
+      let net_per_share = 0;
+      let ce_short_lots = 0, pe_short_lots = 0;
+      let total_long_premium = 0;
+      for (const l of this.genResult.legs) {
+        const sign = l.action === 'SELL' ? 1 : -1;
+        net_per_share += sign * (l.ltp ?? 0) * l.qty_lots;
+        if (l.action === 'SELL' && l.side === 'CE') ce_short_lots += l.qty_lots;
+        if (l.action === 'SELL' && l.side === 'PE') pe_short_lots += l.qty_lots;
+        if (l.action === 'BUY') total_long_premium += (l.ltp ?? 0) * l.qty_lots * lot;
+      }
+      const total_credit = net_per_share * lot;
+      const margin_used = (Math.max(ce_short_lots, pe_short_lots) > 0)
+        ? Math.max(ce_short_lots, pe_short_lots) * margin * 0.90
+        : total_long_premium;
+      const max_profit = total_credit > 0 ? total_credit : (total_long_premium * 5);
+      const yield_per_cr = margin_used > 0 ? Math.round(max_profit / margin_used * 1e7) : 0;
+      const ce_strikes_short = this.genResult.legs.filter(l => l.action === 'SELL' && l.side === 'CE').map(l => l.strike);
+      const pe_strikes_short = this.genResult.legs.filter(l => l.action === 'SELL' && l.side === 'PE').map(l => l.strike);
+      const ce_min = ce_strikes_short.length ? Math.min(...ce_strikes_short) : null;
+      const pe_max = pe_strikes_short.length ? Math.max(...pe_strikes_short) : null;
+      const breakeven_high = ce_min != null ? ce_min + Math.abs(net_per_share) : null;
+      const breakeven_low  = pe_max != null ? pe_max - Math.abs(net_per_share) : null;
+      this.genResult.metrics = {
+        ...this.genResult.metrics,
+        combined_premium: Number(net_per_share.toFixed(2)),
+        total_credit: Math.round(total_credit),
+        margin: Math.round(margin_used),
+        max_profit: Math.round(max_profit),
+        yield_per_cr,
+        breakeven_low,
+        breakeven_high,
+      };
     },
 
     LOT_SIZE() { return this.instrument === 'NIFTY' ? 75 : 20; },
@@ -488,6 +614,7 @@ function recommendApp() {
 
       this.genResult = {
         key, preset, legs,
+        expiry: this.chainData?.expiry || '',
         context: { spot, instrument: this.instrument },
         metrics: {
           combined_premium: Number(net_premium_per_share.toFixed(2)),
