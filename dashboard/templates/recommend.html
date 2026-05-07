@@ -179,7 +179,7 @@
               <div class="text-[10px] uppercase text-red-700 dark:text-red-400 font-bold mb-1">SELL CE</div>
               <div class="flex items-center gap-1 num">
                 <button @click="bumpTierStrike(t.id, 'CE', -1)" class="px-1.5 py-0.5 text-[11px] rounded border border-slate-300 dark:border-slate-600 hover:bg-white dark:hover:bg-slate-700 leading-none" title="−1 grid">−</button>
-                <input type="number" :value="t.ce.strike" @change="setTierStrike(t.id, 'CE', $event.target.value)" class="w-20 px-1 py-0 bg-transparent text-center text-2xl font-bold leading-none border-0 focus:outline-none">
+                <input type="number" :value="t.ce.strike" @change="setTierStrike(t.id, 'CE', $event.target.value)" class="w-[88px] px-1 py-0 bg-transparent text-center text-xl font-bold leading-none border-0 focus:outline-none tracking-tight">
                 <button @click="bumpTierStrike(t.id, 'CE', +1)" class="px-1.5 py-0.5 text-[11px] rounded border border-slate-300 dark:border-slate-600 hover:bg-white dark:hover:bg-slate-700 leading-none" title="+1 grid">+</button>
               </div>
               <div class="num text-xs text-red-700 dark:text-red-400 mt-1" x-text="((t.ce.dist_pct ?? 0) >= 0 ? '+' : '')+(t.ce.dist_pct ?? 0)+'% · '+((t.ce.dist_pts ?? 0) >= 0 ? '+' : '')+(t.ce.dist_pts ?? 0)+' pts'"></div>
@@ -197,7 +197,7 @@
               <div class="text-[10px] uppercase text-green-700 dark:text-green-400 font-bold mb-1">SELL PE</div>
               <div class="flex items-center gap-1 num">
                 <button @click="bumpTierStrike(t.id, 'PE', -1)" class="px-1.5 py-0.5 text-[11px] rounded border border-slate-300 dark:border-slate-600 hover:bg-white dark:hover:bg-slate-700 leading-none" title="−1 grid">−</button>
-                <input type="number" :value="t.pe.strike" @change="setTierStrike(t.id, 'PE', $event.target.value)" class="w-20 px-1 py-0 bg-transparent text-center text-2xl font-bold leading-none border-0 focus:outline-none">
+                <input type="number" :value="t.pe.strike" @change="setTierStrike(t.id, 'PE', $event.target.value)" class="w-[88px] px-1 py-0 bg-transparent text-center text-xl font-bold leading-none border-0 focus:outline-none tracking-tight">
                 <button @click="bumpTierStrike(t.id, 'PE', +1)" class="px-1.5 py-0.5 text-[11px] rounded border border-slate-300 dark:border-slate-600 hover:bg-white dark:hover:bg-slate-700 leading-none" title="+1 grid">+</button>
               </div>
               <div class="num text-xs text-green-700 dark:text-green-400 mt-1" x-text="(t.pe.dist_pct ?? 0)+'% · '+(t.pe.dist_pts ?? 0)+' pts'"></div>
@@ -310,7 +310,7 @@
               <!-- Strike with up/down arrows -->
               <div class="flex items-center border border-[var(--border)] rounded">
                 <button @click="bumpStrike(li, -1)" class="px-1.5 py-0.5 text-[11px] hover:bg-[var(--bg)] border-r border-[var(--border)]" title="Down 1 grid">−</button>
-                <input type="number" :value="leg.strike" @change="setStrike(li, $event.target.value)" class="w-20 px-1.5 py-0.5 bg-transparent text-center font-bold tracking-tight text-[13px] num border-0 focus:outline-none">
+                <input type="number" :value="leg.strike" @change="setStrike(li, $event.target.value)" class="w-[78px] px-1.5 py-0.5 bg-transparent text-center font-bold tracking-tight text-[13px] num border-0 focus:outline-none">
                 <button @click="bumpStrike(li, +1)" class="px-1.5 py-0.5 text-[11px] hover:bg-[var(--bg)] border-l border-[var(--border)]" title="Up 1 grid">+</button>
               </div>
               <span class="text-[10px] font-bold" :class="leg.side === 'CE' ? 'text-loss-600' : 'text-gain-600'" x-text="leg.side"></span>

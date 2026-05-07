@@ -68,6 +68,10 @@
   @keyframes pulse-soft { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
   .pulse-soft { animation: pulse-soft 2s ease-in-out infinite; }
 
+  /* Hide native number-input spinners (eat into our usable width) */
+  input[type="number"]::-webkit-inner-spin-button,
+  input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+  input[type="number"] { -moz-appearance: textfield; appearance: textfield; }
   /* Cloak */
   [x-cloak] { display: none !important; }
   /* Scrollbar */
