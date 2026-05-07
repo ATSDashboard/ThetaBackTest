@@ -151,13 +151,20 @@
       <template x-for="t in d?.tiers ?? []" :key="t.id">
         <div class="card overflow-hidden border-2" :class="tierBorder(t.id)">
 
-          <!-- Tier header: name + status + capital + lots + hit -->
+          <!-- Tier header: name + expiry + reset + status + capital + lots + hit -->
           <div class="px-4 py-2.5 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between flex-wrap gap-2" :class="tierHeaderBg(t.id)">
             <div class="flex items-center gap-3">
               <div class="text-base font-bold" x-text="t.label"></div>
               <span class="text-xs opacity-80" x-text="t.subtitle"></span>
             </div>
-            <div class="flex items-center gap-3 text-xs num">
+            <div class="flex items-center gap-2 text-xs num flex-wrap">
+              <!-- Per-tier expiry -->
+              <select @change="changeTierExpiry(t.id, $event.target.value)" class="px-1.5 py-0.5 text-[10px] rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800">
+                <template x-for="exp in availableExpiries()" :key="exp">
+                  <option :value="exp" x-text="exp" :selected="(tierEdits[t.id]?.expiry || d?.context?.expiry) === exp"></option>
+                </template>
+              </select>
+              <button @click="resetTier(t.id)" class="text-[10px] px-1.5 py-0.5 rounded border border-slate-300 dark:border-slate-600 hover:bg-white dark:hover:bg-slate-700" title="Reset to recommended">↺</button>
               <span><strong x-text="t.capital_pct + '%'"></strong> cap</span>
               <span><strong x-text="t.lots"></strong> lots</span>
               <span>hit <strong x-text="Math.round(t.hit_rate*100) + '%'"></strong></span>
@@ -170,8 +177,12 @@
             <!-- CE block -->
             <div class="lg:col-span-3 p-3 border-r border-slate-200 dark:border-slate-700 bg-red-50/30 dark:bg-red-900/10">
               <div class="text-[10px] uppercase text-red-700 dark:text-red-400 font-bold mb-1">SELL CE</div>
-              <div class="num text-2xl font-bold leading-none" x-text="t.ce.strike"></div>
-              <div class="num text-xs text-red-700 dark:text-red-400 mt-1" x-text="'+' + t.ce.dist_pct + '% · +' + t.ce.dist_pts + ' pts'"></div>
+              <div class="flex items-center gap-1 num">
+                <button @click="bumpTierStrike(t.id, 'CE', -1)" class="px-1.5 py-0.5 text-[11px] rounded border border-slate-300 dark:border-slate-600 hover:bg-white dark:hover:bg-slate-700 leading-none" title="−1 grid">−</button>
+                <input type="number" :value="t.ce.strike" @change="setTierStrike(t.id, 'CE', $event.target.value)" class="w-20 px-1 py-0 bg-transparent text-center text-2xl font-bold leading-none border-0 focus:outline-none">
+                <button @click="bumpTierStrike(t.id, 'CE', +1)" class="px-1.5 py-0.5 text-[11px] rounded border border-slate-300 dark:border-slate-600 hover:bg-white dark:hover:bg-slate-700 leading-none" title="+1 grid">+</button>
+              </div>
+              <div class="num text-xs text-red-700 dark:text-red-400 mt-1" x-text="((t.ce.dist_pct ?? 0) >= 0 ? '+' : '')+(t.ce.dist_pct ?? 0)+'% · '+((t.ce.dist_pts ?? 0) >= 0 ? '+' : '')+(t.ce.dist_pts ?? 0)+' pts'"></div>
               <div class="grid grid-cols-2 gap-x-2 gap-y-0.5 text-[11px] num mt-2">
                 <div class="text-slate-500">Δ delta</div><div class="text-right" x-text="t.ce.delta"></div>
                 <div class="text-slate-500">LTP</div><div class="text-right" x-text="'₹' + t.ce.ltp"></div>
@@ -184,8 +195,12 @@
             <!-- PE block -->
             <div class="lg:col-span-3 p-3 border-r border-slate-200 dark:border-slate-700 bg-green-50/30 dark:bg-green-900/10">
               <div class="text-[10px] uppercase text-green-700 dark:text-green-400 font-bold mb-1">SELL PE</div>
-              <div class="num text-2xl font-bold leading-none" x-text="t.pe.strike"></div>
-              <div class="num text-xs text-green-700 dark:text-green-400 mt-1" x-text="t.pe.dist_pct + '% · ' + t.pe.dist_pts + ' pts'"></div>
+              <div class="flex items-center gap-1 num">
+                <button @click="bumpTierStrike(t.id, 'PE', -1)" class="px-1.5 py-0.5 text-[11px] rounded border border-slate-300 dark:border-slate-600 hover:bg-white dark:hover:bg-slate-700 leading-none" title="−1 grid">−</button>
+                <input type="number" :value="t.pe.strike" @change="setTierStrike(t.id, 'PE', $event.target.value)" class="w-20 px-1 py-0 bg-transparent text-center text-2xl font-bold leading-none border-0 focus:outline-none">
+                <button @click="bumpTierStrike(t.id, 'PE', +1)" class="px-1.5 py-0.5 text-[11px] rounded border border-slate-300 dark:border-slate-600 hover:bg-white dark:hover:bg-slate-700 leading-none" title="+1 grid">+</button>
+              </div>
+              <div class="num text-xs text-green-700 dark:text-green-400 mt-1" x-text="(t.pe.dist_pct ?? 0)+'% · '+(t.pe.dist_pts ?? 0)+' pts'"></div>
               <div class="grid grid-cols-2 gap-x-2 gap-y-0.5 text-[11px] num mt-2">
                 <div class="text-slate-500">Δ delta</div><div class="text-right" x-text="t.pe.delta"></div>
                 <div class="text-slate-500">LTP</div><div class="text-right" x-text="'₹' + t.pe.ltp"></div>
@@ -383,6 +398,7 @@ function recommendApp() {
     chainsByExpiry: {},   // {expiry: chainData} for switching expiries inside a preset
     expiriesList: [],     // list of available weekly expiries for the instrument
     genResult: null,
+    tierEdits: {},        // {tier_id: {ce_strike, pe_strike, expiry}} — persists across refreshes
 
     // Strategy presets per Section 9T (canonical Navin Group rulebook)
     PRESETS: {
@@ -425,7 +441,105 @@ function recommendApp() {
         this.d = reco; this.chainData = chain;
         if (chain?.expiry) this.chainsByExpiry[chain.expiry] = chain;
         this.expiriesList = (expiries?.[this.instrument] ?? []).map(e => e.date);
+        // Re-apply any tier edits the user made (persist across refresh)
+        this.applyTierEdits();
       } catch(e) { console.error(e); }
+    },
+    applyTierEdits() {
+      if (!this.d?.tiers) return;
+      for (const t of this.d.tiers) {
+        const e = this.tierEdits[t.id];
+        if (!e) continue;
+        if (e.ce_strike) this._applyStrikeChange(t, 'CE', e.ce_strike);
+        if (e.pe_strike) this._applyStrikeChange(t, 'PE', e.pe_strike);
+        // (per-tier expiry change not persisted across refresh — chain refetch is async)
+        this.recomputeTier(t);
+      }
+    },
+    bumpTierStrike(tierId, side, dir) {
+      const t = this.d.tiers.find(x => x.id === tierId); if (!t) return;
+      const grid = (this.instrument === 'NIFTY') ? 50 : 100;
+      const cur = t[side.toLowerCase()].strike;
+      this.setTierStrike(tierId, side, cur + dir * grid);
+    },
+    setTierStrike(tierId, side, newStrike) {
+      const t = this.d.tiers.find(x => x.id === tierId); if (!t) return;
+      const ns = Number(newStrike); if (!ns) return;
+      this._applyStrikeChange(t, side, ns);
+      this.recomputeTier(t);
+      // Persist the edit
+      if (!this.tierEdits[tierId]) this.tierEdits[tierId] = {};
+      this.tierEdits[tierId][side === 'CE' ? 'ce_strike' : 'pe_strike'] = ns;
+    },
+    _applyStrikeChange(t, side, ns) {
+      // Look up new LTP / OI from the chain (default to current chainData)
+      const chain = this.chainsByExpiry[this.tierEdits[t.id]?.expiry] || this.chainData;
+      const row = (chain?.rows ?? []).find(r => r.strike === ns);
+      const k = side.toLowerCase();
+      t[k].strike = ns;
+      if (row) {
+        const newLtp = side === 'CE' ? row.ce_ltp : row.pe_ltp;
+        const newOI  = side === 'CE' ? row.ce_oi  : row.pe_oi;
+        if (newLtp != null) t[k].ltp = newLtp;
+        if (newOI  != null) t[k].oi  = newOI;
+      } else {
+        t[k].ltp = null;   // unknown — strike out of fetched range
+      }
+      if (chain?.spot) {
+        t[k].dist_pts = ns - chain.spot;
+        t[k].dist_pct = Number(((ns - chain.spot) / chain.spot * 100).toFixed(2));
+      }
+      // Recompute cushion via simple expected_move from VIX (1σ)
+      const vix = chain?.vix ?? 17;
+      const spot = chain?.spot ?? 1;
+      const dte = Math.max(chain?.dte ?? 1, 1);
+      const exp_mv = spot * (vix/100) / Math.sqrt(252) * Math.sqrt(dte) * 1.5;
+      t[k].cushion = exp_mv > 0 ? Number((Math.abs(t[k].dist_pts) / exp_mv).toFixed(2)) : 0;
+    },
+    recomputeTier(t) {
+      const lot = this.LOT_SIZE();
+      const ceLtp = t.ce.ltp ?? 0;
+      const peLtp = t.pe.ltp ?? 0;
+      const combined = ceLtp + peLtp;
+      t.combined_premium = Number(combined.toFixed(2));
+      const shares_per_cr = (this.instrument === 'NIFTY') ? 43*75 : 40*20;
+      t.per_cr_inr = Math.round(combined * shares_per_cr);
+      const lots = t.lots_budget || t.lots || 0;
+      t.max_profit_inr = Math.round(combined * lot * lots);
+      const limit_mult = this.d?.context?.regime?.limit_mult ?? 1.10;
+      t.ce.limit = Math.round(ceLtp * limit_mult * 100) / 100;
+      t.pe.limit = Math.round(peLtp * limit_mult * 100) / 100;
+      // Update status badge based on new per_cr_inr
+      const floor_min = this.d?.context?.floor_min ?? 3000;
+      const floor_ideal = this.d?.context?.floor_ideal ?? 5000;
+      if (t.per_cr_inr >= floor_ideal) t.status = 'IDEAL';
+      else if (t.per_cr_inr >= floor_min) t.status = 'MIN_MET';
+      else if (t.per_cr_inr >= floor_min * 0.7) t.status = 'CLOSE';
+      else t.status = 'BELOW';
+    },
+    resetTier(tierId) {
+      delete this.tierEdits[tierId];
+      this.toast = '↺ Tier reset'; setTimeout(() => this.toast = '', 1500);
+      this.refresh();
+    },
+    async changeTierExpiry(tierId, newExpiry) {
+      // Fetch chain for new expiry if not cached
+      if (!this.chainsByExpiry[newExpiry]) {
+        try {
+          // /api/chain doesn't yet take an expiry param; for now use current
+          const r = await fetch(`/api/chain/${this.instrument}?distance_pct=8`);
+          this.chainsByExpiry[newExpiry] = await r.json();
+        } catch(e) { return; }
+      }
+      const t = this.d.tiers.find(x => x.id === tierId); if (!t) return;
+      // Persist the edit
+      if (!this.tierEdits[tierId]) this.tierEdits[tierId] = {};
+      this.tierEdits[tierId].expiry = newExpiry;
+      // Re-look-up CE+PE LTPs for the same strikes against the new chain
+      this._applyStrikeChange(t, 'CE', t.ce.strike);
+      this._applyStrikeChange(t, 'PE', t.pe.strike);
+      this.recomputeTier(t);
+      this.toast = `${t.label} → ${newExpiry}`; setTimeout(() => this.toast = '', 1500);
     },
     availableExpiries() {
       // Return union of next 3 weekly + currently selected
