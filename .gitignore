@@ -7,3 +7,16 @@ results/ingestion_rejects.csv
 results/phase1_discovery.json
 *.pyc
 .DS_Store
+# never commit secrets even if anyone misplaces them
+kite_credentials.json
+kite_session.json
+*.token
+# dashboard
+data/dashboard_snapshots/
+
+# tooling
+node_modules/
+.claude/
+
+# transient logs
+results/*.log

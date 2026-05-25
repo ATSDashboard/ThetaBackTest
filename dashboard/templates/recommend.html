@@ -1,0 +1,949 @@
+{% extends "base.html" %}
+{% block title %}{{ instrument }} Strangle Strategy · ThetaDesk{% endblock %}
+{% set active_nav = 'strategy' %}
+{% block content %}
+<div x-data="recommendApp()" x-init="init('{{ instrument }}')" class="space-y-4">
+
+  <!-- ── INSTRUMENT TOGGLE + REFRESH ── -->
+  <div class="flex items-center justify-between flex-wrap gap-2">
+    <div class="flex items-center gap-2">
+      <button @click="instrument='SENSEX'; refresh()" :class="instrument==='SENSEX'?'bg-purple-600 text-white shadow':'bg-slate-100 dark:bg-slate-700'" class="px-3 py-1.5 rounded font-bold text-sm">SENSEX</button>
+      <button @click="instrument='NIFTY'; refresh()" :class="instrument==='NIFTY'?'bg-purple-600 text-white shadow':'bg-slate-100 dark:bg-slate-700'" class="px-3 py-1.5 rounded font-bold text-sm">NIFTY</button>
+      <span class="ml-3 text-xs text-slate-500 num">last update <span x-text="d?.context?.ist_time ?? '—'"></span> IST</span>
+    </div>
+    <button @click="refresh()" class="text-xs px-3 py-1.5 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 rounded font-medium">↻ Refresh</button>
+  </div>
+
+  <!-- ── SECTION 1: MARKET CONTEXT (general info, separate from tiers) ── -->
+  <section>
+    <h2 class="text-xs uppercase tracking-wider text-slate-500 font-semibold mb-2 px-1">Market Context</h2>
+
+    <!-- KPI tiles row 1 -->
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-2 mb-2">
+      <div class="card p-3">
+        <div class="text-[10px] uppercase text-slate-500">SPOT</div>
+        <div class="num text-2xl font-bold leading-none mt-1" x-text="d?.context?.spot ?? '—'"></div>
+        <div class="num text-xs mt-1" :class="(d?.context?.spot_chg_pct ?? 0) >= 0 ? 'text-green-600 dark:text-green-400':'text-red-600 dark:text-red-400'" x-text="((d?.context?.spot_chg_pct ?? 0)>=0?'+':'')+(d?.context?.spot_chg_pct ?? 0)+'%'"></div>
+      </div>
+
+      <div class="card p-3">
+        <div class="text-[10px] uppercase text-slate-500">MAX-PAIN</div>
+        <div class="num text-2xl font-bold leading-none mt-1" x-text="d?.context?.max_pain ?? '—'"></div>
+        <div class="num text-xs mt-1" :class="(d?.context?.max_pain_pct ?? 0) >= 0 ? 'text-green-600':'text-red-600'" x-text="((d?.context?.max_pain_pct ?? 0)>=0?'+':'')+(d?.context?.max_pain_pct ?? 0)+'% '+ ((d?.context?.max_pain_pct ?? 0)>=0?'pulls↑':'pulls↓')"></div>
+      </div>
+
+      <div class="card p-3">
+        <div class="text-[10px] uppercase text-slate-500">VIX</div>
+        <div class="num text-2xl font-bold leading-none mt-1" :class="vixColor()" x-text="d?.context?.vix ?? '—'"></div>
+        <div class="text-xs mt-1 flex items-center gap-1">
+          <span :class="(d?.context?.vix_chg_pct ?? 0) >= 0 ? 'text-red-600':'text-green-600'" x-text="((d?.context?.vix_chg_pct ?? 0)>=0?'+':'')+(d?.context?.vix_chg_pct ?? 0)+'%'"></span>
+          <span class="text-[10px] px-1.5 py-0.5 rounded font-semibold" :class="regimePillCls()" x-text="d?.context?.regime?.name ?? ''"></span>
+        </div>
+      </div>
+
+      <div class="card p-3">
+        <div class="text-[10px] uppercase text-slate-500">BIAS</div>
+        <div class="text-xl font-bold leading-none mt-1" :class="biasColor()" x-text="(d?.context?.bias ?? '—').toUpperCase()"></div>
+        <div class="text-[10px] text-slate-500 mt-1 num" x-text="'PCR ' + (d?.context?.oi_pcr ?? '—')"></div>
+      </div>
+    </div>
+
+    <!-- KPI tiles row 2 -->
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-2 mb-2">
+      <div class="card p-3">
+        <div class="text-[10px] uppercase text-slate-500">DAY O/H/L</div>
+        <div class="num text-xs mt-1 space-y-0.5">
+          <div>O <strong x-text="d?.context?.today_open ?? '—'"></strong></div>
+          <div>H <strong class="text-green-600" x-text="d?.context?.today_high ?? '—'"></strong></div>
+          <div>L <strong class="text-red-600" x-text="d?.context?.today_low ?? '—'"></strong></div>
+        </div>
+      </div>
+
+      <div class="card p-3">
+        <div class="text-[10px] uppercase text-slate-500">EXPIRY · DTE</div>
+        <div class="num text-base font-bold leading-tight mt-1" x-text="d?.context?.expiry ?? '—'"></div>
+        <div class="text-xs mt-1 flex items-center gap-1">
+          <span class="num font-semibold" x-text="'DTE ' + (d?.context?.dte ?? '—')"></span>
+          <span x-show="d?.context?.is_e0" class="text-[10px] px-1.5 py-0.5 bg-blue-600 text-white rounded font-bold">E-0</span>
+          <span x-show="d?.context?.is_e1" class="text-[10px] px-1.5 py-0.5 bg-purple-600 text-white rounded font-bold">E-1</span>
+        </div>
+      </div>
+
+      <div class="card p-3">
+        <div class="text-[10px] uppercase text-slate-500">EXPECTED MOVE (1σ)</div>
+        <div class="num text-xl font-bold leading-none mt-1" x-text="'±' + (d?.context?.expected_move_pct ?? '—') + '%'"></div>
+        <div class="text-[10px] text-slate-500 mt-1 num" x-text="'±' + (d?.context?.expected_move_pts ?? '—') + ' pts'"></div>
+      </div>
+
+      <div class="card p-3">
+        <div class="text-[10px] uppercase text-slate-500">EVENTS TODAY</div>
+        <template x-if="(d?.context?.events ?? []).length === 0">
+          <div class="text-xs text-slate-500 mt-1">—</div>
+        </template>
+        <template x-for="ev in d?.context?.events ?? []" :key="ev.label">
+          <div class="text-xs mt-1" :class="ev.impact==='high'?'text-red-700 dark:text-red-300 font-semibold':(ev.impact==='medium'?'text-yellow-700 dark:text-yellow-300':'text-slate-600 dark:text-slate-400')" x-text="(ev.impact!=='none'?'⚠ ':'') + ev.label"></div>
+        </template>
+      </div>
+    </div>
+
+    <!-- Pivots strip -->
+    <div class="card px-3 py-2 mb-2">
+      <div class="flex items-center gap-3 text-xs num overflow-x-auto">
+        <span class="text-[10px] uppercase text-slate-500 font-semibold whitespace-nowrap">PIVOTS</span>
+        <template x-for="lvl in pivotLevels()" :key="lvl.label">
+          <div class="flex items-center gap-1 px-2 py-1 rounded whitespace-nowrap" :class="lvl.cls">
+            <span class="text-[10px] font-bold" x-text="lvl.label"></span>
+            <span class="font-semibold" x-text="lvl.value"></span>
+            <span class="text-[10px] opacity-70" x-text="lvl.dist"></span>
+          </div>
+        </template>
+      </div>
+    </div>
+
+    <!-- OI walls -->
+    <div class="card p-3">
+      <div class="text-[10px] uppercase text-slate-500 font-semibold mb-2">OI walls (top 3 each side)</div>
+      <div class="grid grid-cols-2 gap-3 text-xs num">
+        <div>
+          <div class="font-semibold text-red-600 dark:text-red-400 mb-1">CE walls (resistance)</div>
+          <template x-for="w in d?.context?.ce_walls ?? []" :key="w.strike">
+            <div class="flex justify-between items-center py-0.5">
+              <span class="font-semibold" x-text="w.strike"></span>
+              <span class="text-slate-500" x-text="(w.oi/1e5).toFixed(1) + 'L OI'"></span>
+              <span class="text-[10px] text-red-500" x-text="'+' + (((w.strike - (d?.context?.spot ?? 0))/(d?.context?.spot ?? 1)*100) || 0).toFixed(2) + '%'"></span>
+            </div>
+          </template>
+        </div>
+        <div>
+          <div class="font-semibold text-green-600 dark:text-green-400 mb-1">PE walls (support)</div>
+          <template x-for="w in d?.context?.pe_walls ?? []" :key="w.strike">
+            <div class="flex justify-between items-center py-0.5">
+              <span class="font-semibold" x-text="w.strike"></span>
+              <span class="text-slate-500" x-text="(w.oi/1e5).toFixed(1) + 'L OI'"></span>
+              <span class="text-[10px] text-green-500" x-text="(((w.strike - (d?.context?.spot ?? 0))/(d?.context?.spot ?? 1)*100) || 0).toFixed(2) + '%'"></span>
+            </div>
+          </template>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── SECTION 2: VERDICT BAR ── -->
+  <section>
+    <div class="card overflow-hidden">
+      <div class="px-4 py-3 flex items-center justify-between gap-3" :class="verdictBg()">
+        <div class="flex items-center gap-3">
+          <span class="num text-3xl font-bold leading-none" x-text="d?.verdict?.score ?? '—'"></span>
+          <div>
+            <div class="font-bold" x-text="d?.verdict?.label ?? '—'"></div>
+            <div class="text-xs opacity-80" x-text="d?.verdict?.reason ?? ''"></div>
+          </div>
+        </div>
+        <div class="text-xs text-right max-w-md hidden md:block" x-text="'→ ' + (d?.verdict?.action ?? '')"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── SECTION 3: 3 RISK TIER CARDS — STACKED ── -->
+  <section>
+    <h2 class="text-xs uppercase tracking-wider text-slate-500 font-semibold mb-2 px-1">Strategy — 3 Tier Layered Recommendation</h2>
+    <div class="space-y-3">
+      <template x-for="t in d?.tiers ?? []" :key="t.id">
+        <div class="card overflow-hidden border-2" :class="tierBorder(t.id)">
+
+          <!-- Tier header: name + expiry + reset + status + capital + lots + hit -->
+          <div class="px-4 py-2.5 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between flex-wrap gap-2" :class="tierHeaderBg(t.id)">
+            <div class="flex items-center gap-3">
+              <div class="text-base font-bold" x-text="t.label"></div>
+              <span class="text-xs opacity-80" x-text="t.subtitle"></span>
+            </div>
+            <div class="flex items-center gap-2 text-xs num flex-wrap">
+              <!-- Per-tier expiry -->
+              <select @change="changeTierExpiry(t.id, $event.target.value)" class="px-1.5 py-0.5 text-[10px] rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800">
+                <template x-for="exp in availableExpiries()" :key="exp">
+                  <option :value="exp" x-text="exp" :selected="(tierEdits[t.id]?.expiry || d?.context?.expiry) === exp"></option>
+                </template>
+              </select>
+              <button @click="resetTier(t.id)" class="text-[10px] px-1.5 py-0.5 rounded border border-slate-300 dark:border-slate-600 hover:bg-white dark:hover:bg-slate-700" title="Reset to recommended">↺</button>
+              <span><strong x-text="t.capital_pct + '%'"></strong> cap</span>
+              <span><strong x-text="t.lots"></strong> lots</span>
+              <span>hit <strong x-text="Math.round(t.hit_rate*100) + '%'"></strong></span>
+              <span class="text-[10px] px-2 py-0.5 rounded font-bold" :class="statusBadge(t.status)" x-text="t.status"></span>
+            </div>
+          </div>
+
+          <!-- Body: CE block | PE block | Combined block | Action block -->
+          <div class="grid grid-cols-1 lg:grid-cols-12 gap-0">
+            <!-- CE block -->
+            <div class="lg:col-span-3 p-3 border-r border-slate-200 dark:border-slate-700 bg-red-50/30 dark:bg-red-900/10">
+              <div class="text-[10px] uppercase text-red-700 dark:text-red-400 font-bold mb-1">SELL CE</div>
+              <div class="flex items-center gap-1 num">
+                <button @click="bumpTierStrike(t.id, 'CE', -1)" class="px-1.5 py-0.5 text-[11px] rounded border border-slate-300 dark:border-slate-600 hover:bg-white dark:hover:bg-slate-700 leading-none" title="−1 grid">−</button>
+                <input type="number" :value="t.ce.strike" @change="setTierStrike(t.id, 'CE', $event.target.value)" class="w-[88px] px-1 py-0 bg-transparent text-center text-xl font-bold leading-none border-0 focus:outline-none tracking-tight">
+                <button @click="bumpTierStrike(t.id, 'CE', +1)" class="px-1.5 py-0.5 text-[11px] rounded border border-slate-300 dark:border-slate-600 hover:bg-white dark:hover:bg-slate-700 leading-none" title="+1 grid">+</button>
+              </div>
+              <div class="num text-xs text-red-700 dark:text-red-400 mt-1" x-text="((t.ce.dist_pct ?? 0) >= 0 ? '+' : '')+(t.ce.dist_pct ?? 0).toFixed(1)+'% · '+((t.ce.dist_pts ?? 0) >= 0 ? '+' : '')+Math.round(t.ce.dist_pts ?? 0)+' pts'"></div>
+              <div class="grid grid-cols-2 gap-x-2 gap-y-0.5 text-[11px] num mt-2">
+                <div class="text-slate-500">Δ delta</div><div class="text-right" x-text="t.ce.delta"></div>
+                <div class="text-slate-500">LTP</div><div class="text-right" x-text="'₹' + t.ce.ltp"></div>
+                <div class="text-slate-500">Limit</div><div class="text-right font-bold text-blue-700 dark:text-blue-300" x-text="'₹' + t.ce.limit"></div>
+                <div class="text-slate-500">Cushion σ</div><div class="text-right" :class="cushColor(t.ce.cushion)" x-text="t.ce.cushion"></div>
+                <div class="text-slate-500">OI</div><div class="text-right text-slate-500" x-text="formatOI(t.ce.oi)"></div>
+              </div>
+            </div>
+
+            <!-- PE block -->
+            <div class="lg:col-span-3 p-3 border-r border-slate-200 dark:border-slate-700 bg-green-50/30 dark:bg-green-900/10">
+              <div class="text-[10px] uppercase text-green-700 dark:text-green-400 font-bold mb-1">SELL PE</div>
+              <div class="flex items-center gap-1 num">
+                <button @click="bumpTierStrike(t.id, 'PE', -1)" class="px-1.5 py-0.5 text-[11px] rounded border border-slate-300 dark:border-slate-600 hover:bg-white dark:hover:bg-slate-700 leading-none" title="−1 grid">−</button>
+                <input type="number" :value="t.pe.strike" @change="setTierStrike(t.id, 'PE', $event.target.value)" class="w-[88px] px-1 py-0 bg-transparent text-center text-xl font-bold leading-none border-0 focus:outline-none tracking-tight">
+                <button @click="bumpTierStrike(t.id, 'PE', +1)" class="px-1.5 py-0.5 text-[11px] rounded border border-slate-300 dark:border-slate-600 hover:bg-white dark:hover:bg-slate-700 leading-none" title="+1 grid">+</button>
+              </div>
+              <div class="num text-xs text-green-700 dark:text-green-400 mt-1" x-text="(t.pe.dist_pct ?? 0).toFixed(1)+'% · '+Math.round(t.pe.dist_pts ?? 0)+' pts'"></div>
+              <div class="grid grid-cols-2 gap-x-2 gap-y-0.5 text-[11px] num mt-2">
+                <div class="text-slate-500">Δ delta</div><div class="text-right" x-text="t.pe.delta"></div>
+                <div class="text-slate-500">LTP</div><div class="text-right" x-text="'₹' + t.pe.ltp"></div>
+                <div class="text-slate-500">Limit</div><div class="text-right font-bold text-blue-700 dark:text-blue-300" x-text="'₹' + t.pe.limit"></div>
+                <div class="text-slate-500">Cushion σ</div><div class="text-right" :class="cushColor(t.pe.cushion)" x-text="t.pe.cushion"></div>
+                <div class="text-slate-500">OI</div><div class="text-right text-slate-500" x-text="formatOI(t.pe.oi)"></div>
+              </div>
+            </div>
+
+            <!-- Combined block -->
+            <div class="lg:col-span-3 p-3 border-r border-slate-200 dark:border-slate-700 bg-blue-50/30 dark:bg-blue-900/10">
+              <div class="text-[10px] uppercase text-slate-500 font-bold mb-2">Combined</div>
+              <div class="space-y-1.5 text-xs num">
+                <div class="flex justify-between"><span class="text-slate-500">Premium</span><span class="font-bold text-base" x-text="'₹' + t.combined_premium"></span></div>
+                <div class="flex justify-between"><span class="text-slate-500">₹/Cr captured</span><span class="font-bold text-base" :class="perCrColor(t.per_cr_inr)" x-text="'₹' + (t.per_cr_inr || 0).toLocaleString()"></span></div>
+                <div class="flex justify-between"><span class="text-slate-500">Max profit</span><span class="font-bold text-emerald-700 dark:text-emerald-400" x-text="'₹' + formatINR(t.max_profit_inr)"></span></div>
+                <div class="flex justify-between"><span class="text-slate-500">Capital used</span><span x-text="'₹' + formatINR(t.capital_inr)"></span></div>
+              </div>
+              <!-- mini progress bar showing per-Cr vs floor/ideal -->
+              <div class="mt-3">
+                <div class="flex justify-between text-[10px] text-slate-500 mb-0.5"><span x-text="'floor ₹' + (d?.context?.floor_min ?? 3000).toLocaleString()"></span><span x-text="'ideal ₹' + (d?.context?.floor_ideal ?? 5000).toLocaleString()"></span></div>
+                <div class="h-1.5 bg-slate-200 dark:bg-slate-700 rounded relative overflow-hidden">
+                  <div class="h-full" :class="perCrBarCls(t.per_cr_inr)" :style="`width: ${Math.min(100, (t.per_cr_inr / ((d?.context?.floor_ideal ?? 5000) * 1.5)) * 100)}%`"></div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Why block + actions -->
+            <div class="lg:col-span-3 p-3 bg-slate-50/50 dark:bg-slate-800/30 flex flex-col">
+              <div class="text-[10px] uppercase text-slate-500 font-bold mb-1">Why these strikes</div>
+              <ul class="text-[11px] text-slate-700 dark:text-slate-300 leading-snug space-y-0.5 mb-2 list-disc list-inside">
+                <template x-for="r in t.ce.reasons.slice(0,3)" :key="'ce'+r">
+                  <li><span class="text-red-600 font-semibold">CE:</span> <span x-text="r"></span></li>
+                </template>
+                <template x-for="r in t.pe.reasons.slice(0,3)" :key="'pe'+r">
+                  <li><span class="text-green-600 font-semibold">PE:</span> <span x-text="r"></span></li>
+                </template>
+              </ul>
+              <div class="mt-auto flex gap-2">
+                <button @click="copyTicket(t)" class="flex-1 text-xs px-2 py-1.5 rounded bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 font-medium">📋 Copy</button>
+                <button class="flex-1 text-xs px-2 py-1.5 rounded bg-blue-600 hover:bg-blue-700 text-white font-medium" disabled title="Auto-fire to Kite — coming">💸 Fire</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </template>
+    </div>
+  </section>
+
+  <!-- ── SECTION 3.5: STRATEGY GENERATOR ── -->
+  <section>
+    <div class="flex items-center justify-between mb-2 px-1">
+      <h2 class="text-xs uppercase tracking-wider text-slate-500 font-semibold">⚡ Strategy Generator · pick a preset to compute strikes + profit potential</h2>
+    </div>
+
+    <!-- Preset chips -->
+    <div class="card p-3 mb-2">
+      <div class="flex flex-wrap gap-2">
+        <template x-for="(p, key) in PRESETS" :key="key">
+          <button @click="genPreset(key)"
+                  :class="genResult?.key === key ? 'bg-[var(--text-1)] text-[var(--surface)]' : 'bg-[var(--bg)] hover:bg-[var(--border)] text-[var(--text-2)]'"
+                  class="px-3 py-1.5 rounded-md text-[11px] font-medium transition" x-text="p.label"></button>
+        </template>
+      </div>
+      <div class="mt-2 text-[10px] text-[var(--text-3)] flex flex-wrap gap-3">
+        <span>Lot size: <strong class="text-[var(--text-2)]" x-text="instrument === 'NIFTY' ? '75' : '20'"></strong></span>
+        <span>Margin/lot E-0: <strong class="text-[var(--text-2)]">₹<span x-text="instrument === 'NIFTY' ? '2.35L' : '2.50L'"></span></strong></span>
+        <span>Capital: <input type="number" min="1" x-model.number="capitalCr" class="w-12 px-1 rounded border border-[var(--border)] bg-[var(--surface)] num"> Cr</span>
+      </div>
+    </div>
+
+    <!-- Generated strategy result card -->
+    <div class="card overflow-hidden" x-show="genResult" x-cloak>
+      <div class="px-5 py-3 border-b border-[var(--border)] flex items-center justify-between flex-wrap gap-2">
+        <div>
+          <h3 class="text-[14px] font-semibold tracking-tight" x-text="genResult?.preset?.label"></h3>
+          <div class="text-[11px] text-[var(--text-3)] mt-0.5" x-text="genResult?.preset?.notes"></div>
+        </div>
+        <div class="flex items-center gap-3 flex-wrap">
+          <!-- Expiry selector -->
+          <div class="flex items-center gap-1.5 text-[11px]">
+            <label class="uppercase text-[var(--text-3)] tracking-wider">Expiry</label>
+            <select x-model="genResult.expiry" @change="changeExpiry()" class="px-2 py-1 rounded-md border border-[var(--border)] bg-[var(--surface)] text-[11px] num">
+              <template x-for="exp in availableExpiries()" :key="exp">
+                <option :value="exp" x-text="exp"></option>
+              </template>
+            </select>
+          </div>
+          <!-- Reset button -->
+          <button @click="resetToRecommended()" class="text-[11px] px-2 py-1 rounded border border-[var(--border)] hover:bg-[var(--bg)]" title="Reset to auto-recommended strikes & expiry">↺ Reset</button>
+          <!-- Timing -->
+          <div class="flex items-center gap-1.5">
+            <span class="text-[10px] uppercase tracking-wider text-[var(--text-3)]">Timing</span>
+            <span class="px-2 py-0.5 rounded text-[11px] font-semibold bg-[var(--bg)] text-[var(--text-2)]" x-text="genResult?.preset?.timing"></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Strikes + key metrics -->
+      <div class="grid grid-cols-1 md:grid-cols-2 divide-y md:divide-y-0 md:divide-x divide-[var(--border)]">
+        <!-- Left: legs -->
+        <div class="p-5 space-y-3">
+          <div class="text-[10px] uppercase tracking-wider text-[var(--text-3)] font-semibold mb-2">Legs</div>
+          <template x-for="(leg, li) in genResult?.legs ?? []" :key="li">
+            <div class="flex items-center gap-2 num text-[13px]">
+              <span class="px-2 py-0.5 rounded text-[10px] font-bold w-12 text-center" :class="leg.action === 'SELL' ? 'bg-loss-50 text-loss-700' : 'bg-gain-50 text-gain-700'" x-text="leg.action"></span>
+              <!-- Strike with up/down arrows -->
+              <div class="flex items-center border border-[var(--border)] rounded">
+                <button @click="bumpStrike(li, -1)" class="px-1.5 py-0.5 text-[11px] hover:bg-[var(--bg)] border-r border-[var(--border)]" title="Down 1 grid">−</button>
+                <input type="number" :value="leg.strike" @change="setStrike(li, $event.target.value)" class="w-[78px] px-1.5 py-0.5 bg-transparent text-center font-bold tracking-tight text-[13px] num border-0 focus:outline-none">
+                <button @click="bumpStrike(li, +1)" class="px-1.5 py-0.5 text-[11px] hover:bg-[var(--bg)] border-l border-[var(--border)]" title="Up 1 grid">+</button>
+              </div>
+              <span class="text-[10px] font-bold" :class="leg.side === 'CE' ? 'text-loss-600' : 'text-gain-600'" x-text="leg.side"></span>
+              <span class="text-[var(--text-3)] text-[10px]" x-text="'(' + (leg.dist_pct >= 0 ? '+' : '') + (leg.dist_pct ?? 0).toFixed(1) + '%)'"></span>
+              <span class="ml-auto font-semibold" x-text="'₹' + (leg.ltp ?? '—')"></span>
+              <!-- Qty editable -->
+              <input type="number" min="1" :value="leg.qty_lots" @change="setLots(li, $event.target.value)" class="w-12 px-1 py-0.5 rounded border border-[var(--border)] bg-[var(--surface)] num text-right text-[11px]">
+              <span class="text-[9px] text-[var(--text-3)]">L</span>
+            </div>
+          </template>
+          <div class="border-t border-[var(--border)] pt-3 mt-3 space-y-1.5 text-[12px]">
+            <div class="flex justify-between"><span class="text-[var(--text-3)]">Combined premium</span><span class="num font-semibold" x-text="(genResult?.metrics?.combined_premium >= 0 ? '+₹' : '−₹') + Math.abs(genResult?.metrics?.combined_premium ?? 0).toFixed(2)"></span></div>
+            <div class="flex justify-between"><span class="text-[var(--text-3)]">Total credit / debit</span><span class="num font-semibold" :class="(genResult?.metrics?.total_credit ?? 0) >= 0 ? 'text-gain-600' : 'text-loss-600'" x-text="((genResult?.metrics?.total_credit ?? 0) >= 0 ? '+₹' : '−₹') + formatINR(Math.abs(genResult?.metrics?.total_credit ?? 0))"></span></div>
+            <div class="flex justify-between"><span class="text-[var(--text-3)]">Margin used</span><span class="num font-semibold" x-text="'₹' + formatINR(genResult?.metrics?.margin ?? 0)"></span></div>
+          </div>
+        </div>
+
+        <!-- Right: profit potential -->
+        <div class="p-5 space-y-3 bg-[var(--bg)]/30">
+          <div class="text-[10px] uppercase tracking-wider text-[var(--text-3)] font-semibold mb-2">Profit potential</div>
+          <div>
+            <div class="text-[10px] text-[var(--text-3)] uppercase tracking-wider">Probability of profit</div>
+            <div class="num text-[28px] font-bold tracking-tight" :class="hitColor(genResult?.metrics?.hit_rate)" x-text="((genResult?.metrics?.hit_rate ?? 0) * 100).toFixed(0) + '%'"></div>
+            <div class="text-[10px] text-[var(--text-3)]">based on cushion + backtest hit-rate by tier</div>
+          </div>
+          <div class="grid grid-cols-2 gap-3 text-[12px]">
+            <div>
+              <div class="text-[10px] text-[var(--text-3)] uppercase tracking-wider">Max profit</div>
+              <div class="num text-[15px] font-semibold text-gain-600" x-text="'₹' + formatINR(genResult?.metrics?.max_profit ?? 0)"></div>
+              <div class="text-[10px] text-[var(--text-3)]">if all expire worthless</div>
+            </div>
+            <div>
+              <div class="text-[10px] text-[var(--text-3)] uppercase tracking-wider">Yield/Cr</div>
+              <div class="num text-[15px] font-semibold" :class="yieldColor(genResult?.metrics?.yield_per_cr)" x-text="'₹' + (genResult?.metrics?.yield_per_cr ?? 0).toLocaleString()"></div>
+              <div class="text-[10px] text-[var(--text-3)]">target ₹5K · floor ₹3K</div>
+            </div>
+            <div>
+              <div class="text-[10px] text-[var(--text-3)] uppercase tracking-wider">Lower BE</div>
+              <div class="num text-[14px] font-semibold" x-text="genResult?.metrics?.breakeven_low ? Math.round(genResult.metrics.breakeven_low) : '—'"></div>
+              <div class="text-[10px] text-[var(--text-3)]" x-show="genResult?.metrics?.breakeven_low" x-text="'(' + ((genResult.metrics.breakeven_low - genResult.context.spot)/genResult.context.spot*100).toFixed(2) + '%)'"></div>
+            </div>
+            <div>
+              <div class="text-[10px] text-[var(--text-3)] uppercase tracking-wider">Upper BE</div>
+              <div class="num text-[14px] font-semibold" x-text="genResult?.metrics?.breakeven_high ? Math.round(genResult.metrics.breakeven_high) : '—'"></div>
+              <div class="text-[10px] text-[var(--text-3)]" x-show="genResult?.metrics?.breakeven_high" x-text="'(+' + ((genResult.metrics.breakeven_high - genResult.context.spot)/genResult.context.spot*100).toFixed(2) + '%)'"></div>
+            </div>
+          </div>
+          <div class="border-t border-[var(--border)] pt-3 mt-2 text-[11px] text-[var(--text-2)] space-y-1.5">
+            <div x-show="genResult?.metrics?.warning" class="text-warn-600 font-medium" x-text="genResult?.metrics?.warning"></div>
+            <div x-show="genResult?.metrics?.notes" x-text="genResult?.metrics?.notes"></div>
+          </div>
+          <div class="flex gap-2 mt-3">
+            <button @click="sendPresetToReport(false)" class="flex-1 px-3 py-1.5 rounded-md text-[11px] font-medium border border-[var(--border)] hover:bg-[var(--surface)]">Append to Report</button>
+            <button @click="sendPresetToReport(true)"  class="flex-1 px-3 py-1.5 rounded-md text-[11px] font-medium bg-[var(--text-1)] text-[var(--surface)]">Replace &amp; Send</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── SECTION 4: VISUAL PRICE LADDER ── -->
+  <section>
+    <h2 class="text-xs uppercase tracking-wider text-slate-500 font-semibold mb-2 px-1">Price ladder · spot · max-pain · walls · 1σ band · tier strikes</h2>
+    <div class="card p-3">
+      <div class="relative h-72 num text-[11px]">
+        <svg viewBox="0 0 800 288" class="w-full h-full" preserveAspectRatio="none" x-html="ladderSvg()"></svg>
+      </div>
+    </div>
+  </section>
+
+  <!-- toast -->
+  <div x-show="toast" x-cloak class="fixed bottom-4 right-4 px-4 py-2 rounded-lg shadow-lg bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 text-sm" x-text="toast"></div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function recommendApp() {
+  return {
+    instrument: '{{ instrument }}',
+    d: null,
+    toast: '',
+    capitalCr: 100,
+    chainData: null,
+    chainsByExpiry: {},   // {expiry: chainData} for switching expiries inside a preset
+    expiriesList: [],     // list of available weekly expiries for the instrument
+    genResult: null,
+    tierEdits: {},        // {tier_id: {ce_strike, pe_strike, expiry}} — persists across refreshes
+
+    // Strategy presets per Section 9T (canonical Navin Group rulebook)
+    PRESETS: {
+      e0_bucket_a:  { label: '🛡 E-0 Bucket A · Deep OTM',  dist: 2.7, cap_pct: 95, hit: 0.96,
+                      sides: ['CE','PE'], action: 'SELL',  timing: 'E-0 9:17-9:22',
+                      notes: 'Ultra-safe 2.5%+ OTM strangle. 95% capital. Hold to expiry.' },
+      e0_bucket_b2: { label: '⚖ E-0 Bucket B2 · Mid',       dist: 1.0, cap_pct: 5,  hit: 0.85,
+                      sides: ['CE','PE'], action: 'SELL',  timing: 'E-0 9:17-9:22',
+                      notes: 'Higher-premium strangle ~1% OTM. Capped at 10% cap. Hold to expiry.' },
+      e0_bucket_b1: { label: '🎯 E-0 Bucket B1 · ATM Straddle', dist: 0.3, cap_pct: 5, hit: 0.55,
+                      sides: ['CE','PE'], action: 'SELL',  timing: 'E-0 9:45-10:15 ONLY · close 12:00 hard',
+                      notes: 'Opportunistic ATM straddle. Use ONLY on calm low-VIX days.',
+                      warning: '⚠ B1 hard close at 12:00. Skip on volatile days / event days.' },
+      e1_early:     { label: '📅 E-1 Early · 10 AM (legacy)', dist: 4.0, cap_pct: 5, hit: 0.92,
+                      sides: ['CE','PE'], action: 'SELL',  timing: 'E-1 10:00 (legacy v2 rule)',
+                      notes: 'Legacy v2 entry. Held overnight to E-0 close. Now superseded by E-1 Late.' },
+      e1_late:      { label: '📅 E-1 Late · 2:45+ PM', dist: 4.0, cap_pct: 5, hit: 0.85,
+                      sides: ['CE','PE'], action: 'SELL',  timing: 'E-1 14:45-15:15 ONLY',
+                      notes: 'Rohan post-6-May rule: news risk window 9:15-14:45 BLOCKED. Required ≥3.5% OTM. Per-Cr ≥ ₹7,500 floor.' },
+      iron_condor:  { label: '🧊 Iron Condor · capped risk', dist: 2.5, wing: 1.5, cap_pct: 10, hit: 0.85,
+                      sides: ['CE','PE'], action: 'SPREAD', timing: 'any',
+                      notes: 'Sells at 2.5% OTM, BUYS wings at 4% OTM → margin reduced ~80%, max loss capped.' },
+      lottery:      { label: '🎟 Lottery Buy · Harvest', dist: 5.0, cap_pct: 1, hit: 0.30,
+                      sides: ['CE','PE'], action: 'BUY',   timing: 'E-0 14:00-14:30 (SENSEX manipulation window)',
+                      notes: 'Buy 5 deep-OTM cheap strikes (₹0.30 LTP) hoping for 5-10× spike. Sell-limits via GTT.' },
+    },
+
+    async init(inst) {
+      this.instrument = inst;
+      await this.refresh();
+      setInterval(() => this.refresh(), 15000);
+    },
+    async refresh() {
+      try {
+        const [reco, chain, expiries] = await Promise.all([
+          fetch(`/api/recommendations/${this.instrument}?capital_cr=${this.capitalCr}`).then(r => r.json()),
+          fetch(`/api/chain/${this.instrument}?distance_pct=8`).then(r => r.json()),
+          fetch('/api/expiries').then(r => r.json()).catch(() => null),
+        ]);
+        this.d = reco; this.chainData = chain;
+        if (chain?.expiry) this.chainsByExpiry[chain.expiry] = chain;
+        this.expiriesList = (expiries?.[this.instrument] ?? []).map(e => e.date);
+        // Re-apply any tier edits the user made (persist across refresh)
+        this.applyTierEdits();
+      } catch(e) { console.error(e); }
+    },
+    applyTierEdits() {
+      if (!this.d?.tiers) return;
+      for (const t of this.d.tiers) {
+        const e = this.tierEdits[t.id];
+        if (!e) continue;
+        if (e.ce_strike) this._applyStrikeChange(t, 'CE', e.ce_strike);
+        if (e.pe_strike) this._applyStrikeChange(t, 'PE', e.pe_strike);
+        // (per-tier expiry change not persisted across refresh — chain refetch is async)
+        this.recomputeTier(t);
+      }
+    },
+    bumpTierStrike(tierId, side, dir) {
+      const t = this.d.tiers.find(x => x.id === tierId); if (!t) return;
+      const grid = (this.instrument === 'NIFTY') ? 50 : 100;
+      const cur = t[side.toLowerCase()].strike;
+      this.setTierStrike(tierId, side, cur + dir * grid);
+    },
+    setTierStrike(tierId, side, newStrike) {
+      const t = this.d.tiers.find(x => x.id === tierId); if (!t) return;
+      const ns = Number(newStrike); if (!ns) return;
+      this._applyStrikeChange(t, side, ns);
+      this.recomputeTier(t);
+      // Persist the edit
+      if (!this.tierEdits[tierId]) this.tierEdits[tierId] = {};
+      this.tierEdits[tierId][side === 'CE' ? 'ce_strike' : 'pe_strike'] = ns;
+    },
+    _applyStrikeChange(t, side, ns) {
+      // Look up new LTP / OI from the chain (default to current chainData)
+      const chain = this.chainsByExpiry[this.tierEdits[t.id]?.expiry] || this.chainData;
+      const row = (chain?.rows ?? []).find(r => r.strike === ns);
+      const k = side.toLowerCase();
+      t[k].strike = ns;
+      if (row) {
+        const newLtp = side === 'CE' ? row.ce_ltp : row.pe_ltp;
+        const newOI  = side === 'CE' ? row.ce_oi  : row.pe_oi;
+        if (newLtp != null) t[k].ltp = newLtp;
+        if (newOI  != null) t[k].oi  = newOI;
+      } else {
+        t[k].ltp = null;   // unknown — strike out of fetched range
+      }
+      if (chain?.spot) {
+        t[k].dist_pts = Math.round(ns - chain.spot);
+        t[k].dist_pct = Number(((ns - chain.spot) / chain.spot * 100).toFixed(1));
+      }
+      // Recompute cushion via simple expected_move from VIX (1σ)
+      const vix = chain?.vix ?? 17;
+      const spot = chain?.spot ?? 1;
+      const dte = Math.max(chain?.dte ?? 1, 1);
+      const exp_mv = spot * (vix/100) / Math.sqrt(252) * Math.sqrt(dte) * 1.5;
+      t[k].cushion = exp_mv > 0 ? Number((Math.abs(t[k].dist_pts) / exp_mv).toFixed(2)) : 0;
+    },
+    recomputeTier(t) {
+      const lot = this.LOT_SIZE();
+      const ceLtp = t.ce.ltp ?? 0;
+      const peLtp = t.pe.ltp ?? 0;
+      const combined = ceLtp + peLtp;
+      t.combined_premium = Number(combined.toFixed(2));
+      const shares_per_cr = (this.instrument === 'NIFTY') ? 43*75 : 40*20;
+      t.per_cr_inr = Math.round(combined * shares_per_cr);
+      const lots = t.lots_budget || t.lots || 0;
+      t.max_profit_inr = Math.round(combined * lot * lots);
+      const limit_mult = this.d?.context?.regime?.limit_mult ?? 1.10;
+      t.ce.limit = Math.round(ceLtp * limit_mult * 100) / 100;
+      t.pe.limit = Math.round(peLtp * limit_mult * 100) / 100;
+      // Update status badge based on new per_cr_inr
+      const floor_min = this.d?.context?.floor_min ?? 3000;
+      const floor_ideal = this.d?.context?.floor_ideal ?? 5000;
+      if (t.per_cr_inr >= floor_ideal) t.status = 'IDEAL';
+      else if (t.per_cr_inr >= floor_min) t.status = 'MIN_MET';
+      else if (t.per_cr_inr >= floor_min * 0.7) t.status = 'CLOSE';
+      else t.status = 'BELOW';
+    },
+    resetTier(tierId) {
+      delete this.tierEdits[tierId];
+      this.toast = '↺ Tier reset'; setTimeout(() => this.toast = '', 1500);
+      this.refresh();
+    },
+    async changeTierExpiry(tierId, newExpiry) {
+      // Fetch chain for new expiry if not cached
+      if (!this.chainsByExpiry[newExpiry]) {
+        try {
+          // /api/chain doesn't yet take an expiry param; for now use current
+          const r = await fetch(`/api/chain/${this.instrument}?distance_pct=8`);
+          this.chainsByExpiry[newExpiry] = await r.json();
+        } catch(e) { return; }
+      }
+      const t = this.d.tiers.find(x => x.id === tierId); if (!t) return;
+      // Persist the edit
+      if (!this.tierEdits[tierId]) this.tierEdits[tierId] = {};
+      this.tierEdits[tierId].expiry = newExpiry;
+      // Re-look-up CE+PE LTPs for the same strikes against the new chain
+      this._applyStrikeChange(t, 'CE', t.ce.strike);
+      this._applyStrikeChange(t, 'PE', t.pe.strike);
+      this.recomputeTier(t);
+      this.toast = `${t.label} → ${newExpiry}`; setTimeout(() => this.toast = '', 1500);
+    },
+    availableExpiries() {
+      // Return union of next 3 weekly + currently selected
+      const base = [...this.expiriesList];
+      if (this.genResult?.expiry && !base.includes(this.genResult.expiry)) base.push(this.genResult.expiry);
+      return base;
+    },
+    async changeExpiry() {
+      if (!this.genResult) return;
+      const exp = this.genResult.expiry;
+      // Fetch chain for this expiry if not cached
+      if (!this.chainsByExpiry[exp]) {
+        this.toast = 'Loading ' + exp + '…';
+        try {
+          // Use position-analysis-style approach — call /api/chain with expiry param
+          // Currently /api/chain doesn't accept expiry; fall back to default chain for now
+          const r = await fetch(`/api/chain/${this.instrument}?distance_pct=8`);
+          const j = await r.json();
+          this.chainsByExpiry[exp] = j;
+        } catch(e) { this.toast = '× ' + e.message; setTimeout(() => this.toast = '', 2000); return; }
+      }
+      // Re-lookup LTPs for current legs against the new expiry's chain
+      const chain = this.chainsByExpiry[exp];
+      for (const leg of this.genResult.legs) {
+        const row = (chain?.rows ?? []).find(r => r.strike === leg.strike);
+        leg.ltp = (leg.side === 'CE' ? row?.ce_ltp : row?.pe_ltp) ?? leg.ltp;
+        if (chain?.spot) leg.dist_pct = Number(((leg.strike - chain.spot) / chain.spot * 100).toFixed(2));
+      }
+      this.recomputeGenMetrics();
+      this.toast = `Expiry → ${exp}`; setTimeout(() => this.toast = '', 1500);
+    },
+    bumpStrike(legIdx, dir) {
+      const leg = this.genResult?.legs?.[legIdx]; if (!leg) return;
+      const grid = (this.instrument === 'NIFTY') ? 50 : 100;
+      this.setStrike(legIdx, leg.strike + dir * grid);
+    },
+    setStrike(legIdx, newStrike) {
+      const leg = this.genResult?.legs?.[legIdx]; if (!leg) return;
+      const ns = Number(newStrike);
+      if (!ns) return;
+      leg.strike = ns;
+      // Look up new LTP from chain
+      const chain = this.chainsByExpiry[this.genResult.expiry] || this.chainData;
+      const row = (chain?.rows ?? []).find(r => r.strike === ns);
+      if (row) {
+        const newLtp = leg.side === 'CE' ? row.ce_ltp : row.pe_ltp;
+        if (newLtp != null) leg.ltp = newLtp;
+        if (chain?.spot) leg.dist_pct = Number(((ns - chain.spot) / chain.spot * 100).toFixed(2));
+      }
+      this.recomputeGenMetrics();
+    },
+    setLots(legIdx, newLots) {
+      const leg = this.genResult?.legs?.[legIdx]; if (!leg) return;
+      const n = Math.max(1, Number(newLots) || 1);
+      leg.qty_lots = n;
+      this.recomputeGenMetrics();
+    },
+    resetToRecommended() {
+      if (!this.genResult?.key) return;
+      this.genPreset(this.genResult.key);   // re-run the preset → restores recommended state
+      this.toast = '↺ Reset to recommended'; setTimeout(() => this.toast = '', 1500);
+    },
+    recomputeGenMetrics() {
+      // Recompute combined premium, margin, max_profit, breakevens, yield/Cr
+      // using the (possibly edited) genResult.legs array
+      if (!this.genResult || !this.genResult.legs.length) return;
+      const lot = this.LOT_SIZE();
+      const margin = this.MARGIN_PER_LOT();
+      let net_per_share = 0;
+      let ce_short_lots = 0, pe_short_lots = 0;
+      let total_long_premium = 0;
+      for (const l of this.genResult.legs) {
+        const sign = l.action === 'SELL' ? 1 : -1;
+        net_per_share += sign * (l.ltp ?? 0) * l.qty_lots;
+        if (l.action === 'SELL' && l.side === 'CE') ce_short_lots += l.qty_lots;
+        if (l.action === 'SELL' && l.side === 'PE') pe_short_lots += l.qty_lots;
+        if (l.action === 'BUY') total_long_premium += (l.ltp ?? 0) * l.qty_lots * lot;
+      }
+      const total_credit = net_per_share * lot;
+      const margin_used = (Math.max(ce_short_lots, pe_short_lots) > 0)
+        ? Math.max(ce_short_lots, pe_short_lots) * margin * 0.90
+        : total_long_premium;
+      const max_profit = total_credit > 0 ? total_credit : (total_long_premium * 5);
+      const yield_per_cr = margin_used > 0 ? Math.round(max_profit / margin_used * 1e7) : 0;
+      const ce_strikes_short = this.genResult.legs.filter(l => l.action === 'SELL' && l.side === 'CE').map(l => l.strike);
+      const pe_strikes_short = this.genResult.legs.filter(l => l.action === 'SELL' && l.side === 'PE').map(l => l.strike);
+      const ce_min = ce_strikes_short.length ? Math.min(...ce_strikes_short) : null;
+      const pe_max = pe_strikes_short.length ? Math.max(...pe_strikes_short) : null;
+      const breakeven_high = ce_min != null ? ce_min + Math.abs(net_per_share) : null;
+      const breakeven_low  = pe_max != null ? pe_max - Math.abs(net_per_share) : null;
+      this.genResult.metrics = {
+        ...this.genResult.metrics,
+        combined_premium: Number(net_per_share.toFixed(2)),
+        total_credit: Math.round(total_credit),
+        margin: Math.round(margin_used),
+        max_profit: Math.round(max_profit),
+        yield_per_cr,
+        breakeven_low,
+        breakeven_high,
+      };
+    },
+
+    LOT_SIZE() { return this.instrument === 'NIFTY' ? 75 : 20; },
+    MARGIN_PER_LOT() { return this.instrument === 'NIFTY' ? 235000 : 250000; },
+
+    nearestStrike(target, side) {
+      const rows = this.chainData?.rows ?? [];
+      let best = null, bestD = Infinity;
+      for (const r of rows) {
+        const ltp = side === 'CE' ? r.ce_ltp : r.pe_ltp;
+        if (!ltp || ltp <= 0) continue;
+        const d = Math.abs(r.strike - target);
+        if (d < bestD) { bestD = d; best = { strike: r.strike, ltp, dist_pct: r.dist_pct }; }
+      }
+      return best;
+    },
+
+    genPreset(key) {
+      const preset = this.PRESETS[key];
+      if (!preset || !this.chainData) return;
+      const spot = this.chainData.spot;
+      const lot = this.LOT_SIZE();
+      const margin = this.MARGIN_PER_LOT();
+      const cap_inr = this.capitalCr * 1e7 * (preset.cap_pct / 100);
+      const lots = Math.max(1, Math.floor(cap_inr / margin));
+
+      const legs = [];
+
+      if (preset.action === 'SPREAD') {
+        // Iron Condor: SELL at dist%, BUY at dist% + wing
+        const ce_short = this.nearestStrike(spot * (1 + preset.dist/100), 'CE');
+        const ce_long  = this.nearestStrike(spot * (1 + (preset.dist + preset.wing)/100), 'CE');
+        const pe_short = this.nearestStrike(spot * (1 - preset.dist/100), 'PE');
+        const pe_long  = this.nearestStrike(spot * (1 - (preset.dist + preset.wing)/100), 'PE');
+        if (ce_short) legs.push({ ...ce_short, side: 'CE', action: 'SELL', qty_lots: lots });
+        if (ce_long)  legs.push({ ...ce_long,  side: 'CE', action: 'BUY',  qty_lots: lots });
+        if (pe_short) legs.push({ ...pe_short, side: 'PE', action: 'SELL', qty_lots: lots });
+        if (pe_long)  legs.push({ ...pe_long,  side: 'PE', action: 'BUY',  qty_lots: lots });
+      } else if (key === 'lottery') {
+        // 5 deep OTM strikes: 3 different distances symmetric
+        const dists = [4.5, 5.0, 5.5, 6.0, 6.5];
+        const cap_per_strike = (this.capitalCr * 1e7 * preset.cap_pct / 100) / 5;
+        for (let i = 0; i < dists.length; i++) {
+          const sideChoice = (i % 2 === 0) ? 'CE' : 'PE';
+          const tgt = sideChoice === 'CE' ? spot * (1 + dists[i]/100) : spot * (1 - dists[i]/100);
+          const r = this.nearestStrike(tgt, sideChoice);
+          if (r && r.ltp <= 1.0) {
+            const lots_l = Math.max(1, Math.floor(cap_per_strike / (r.ltp * lot)));
+            legs.push({ ...r, side: sideChoice, action: 'BUY', qty_lots: lots_l });
+          }
+        }
+      } else {
+        // Plain strangle (Bucket A / B2 / B1 / E-1)
+        for (const side of preset.sides) {
+          const tgt = side === 'CE' ? spot * (1 + preset.dist/100) : spot * (1 - preset.dist/100);
+          const r = this.nearestStrike(tgt, side);
+          if (r) legs.push({ ...r, side, action: preset.action, qty_lots: lots });
+        }
+      }
+
+      // Compute metrics
+      let net_premium_per_share = 0;
+      let ce_short_lots = 0, pe_short_lots = 0;
+      let total_long_premium = 0;
+      for (const l of legs) {
+        const sign = l.action === 'SELL' ? 1 : -1;
+        net_premium_per_share += sign * l.ltp * l.qty_lots;
+        if (l.action === 'SELL' && l.side === 'CE') ce_short_lots += l.qty_lots;
+        if (l.action === 'SELL' && l.side === 'PE') pe_short_lots += l.qty_lots;
+        if (l.action === 'BUY') total_long_premium += l.ltp * l.qty_lots * lot;
+      }
+      const total_credit = net_premium_per_share * lot;
+      const margin_used = (Math.max(ce_short_lots, pe_short_lots) > 0)
+        ? Math.max(ce_short_lots, pe_short_lots) * margin * 0.90
+        : total_long_premium;
+      const max_profit = total_credit > 0 ? total_credit : (preset.action === 'BUY' ? total_long_premium * 5 : 0);
+      const yield_per_cr = margin_used > 0 ? Math.round(max_profit / margin_used * 1e7) : 0;
+
+      // Breakevens
+      const ce_strikes_short = legs.filter(l => l.action === 'SELL' && l.side === 'CE').map(l => l.strike);
+      const pe_strikes_short = legs.filter(l => l.action === 'SELL' && l.side === 'PE').map(l => l.strike);
+      const ce_min = ce_strikes_short.length ? Math.min(...ce_strikes_short) : null;
+      const pe_max = pe_strikes_short.length ? Math.max(...pe_strikes_short) : null;
+      const breakeven_high = ce_min != null ? ce_min + Math.abs(net_premium_per_share) : null;
+      const breakeven_low  = pe_max != null ? pe_max - Math.abs(net_premium_per_share) : null;
+
+      this.genResult = {
+        key, preset, legs,
+        expiry: this.chainData?.expiry || '',
+        context: { spot, instrument: this.instrument },
+        metrics: {
+          combined_premium: Number(net_premium_per_share.toFixed(2)),
+          total_credit: Math.round(total_credit),
+          margin: Math.round(margin_used),
+          max_profit: Math.round(max_profit),
+          yield_per_cr,
+          breakeven_low,
+          breakeven_high,
+          hit_rate: preset.hit,
+          warning: preset.warning,
+          notes: preset.notes,
+        },
+      };
+    },
+
+    sendPresetToReport(replace) {
+      if (!this.genResult || !this.genResult.legs.length) return;
+      const lot = this.LOT_SIZE();
+      const expiry = this.chainData?.expiry || this.d?.context?.expiry || '';
+      const fills = this.genResult.legs.map(leg => ({
+        instrument: this.instrument,
+        expiry,                                  // ← carry through from chain context
+        strike: leg.strike, side: leg.side,
+        qty: (leg.action === 'SELL' ? -1 : 1) * leg.qty_lots * lot,
+        avg_price: leg.ltp,
+        broker: 'preset',
+        time: new Date().toISOString().slice(0, 16).replace('T', ' '),
+        note: 'preset · ' + this.genResult.key,
+      }));
+      let positions = JSON.parse(localStorage.getItem('positions') || '[]');
+      if (replace) positions = fills; else positions = positions.concat(fills);
+      localStorage.setItem('positions', JSON.stringify(positions));
+      this.toast = `${replace ? 'Replaced' : 'Appended'} ${fills.length} legs → Report`;
+      setTimeout(() => this.toast = '', 2500);
+    },
+    hitColor(h) {
+      if (h == null) return 'text-[var(--text-3)]';
+      if (h >= 0.92) return 'text-gain-600';
+      if (h >= 0.80) return 'text-gain-500';
+      if (h >= 0.60) return 'text-warn-500';
+      return 'text-loss-600';
+    },
+    yieldColor(y) {
+      if (y == null) return 'text-[var(--text-3)]';
+      if (y >= 5000) return 'text-gain-600';
+      if (y >= 3000) return 'text-gain-500';
+      if (y >= 1000) return 'text-warn-500';
+      if (y >= 0) return 'text-[var(--text-1)]';
+      return 'text-loss-600';
+    },
+    formatINR(v) {
+      if (!v) return '0';
+      const a = Math.abs(v);
+      if (a >= 1e7) return (v/1e7).toFixed(2) + 'Cr';
+      if (a >= 1e5) return (v/1e5).toFixed(2) + 'L';
+      if (a >= 1e3) return (v/1e3).toFixed(0) + 'K';
+      return Math.round(v).toLocaleString();
+    },
+    copyTicket(t) {
+      navigator.clipboard.writeText(t.ticket).then(() => {
+        this.toast = '✓ Copied ticket to clipboard'; setTimeout(()=>this.toast='', 2000);
+      });
+    },
+    biasColor() {
+      const b = this.d?.context?.bias;
+      return b==='bullish' ? 'text-green-600 dark:text-green-400' : (b==='bearish' ? 'text-red-600 dark:text-red-400' : 'text-slate-700 dark:text-slate-300');
+    },
+    vixColor() {
+      const v = this.d?.context?.vix ?? 0;
+      if (v < 13) return 'text-slate-500';
+      if (v < 16) return 'text-slate-700 dark:text-slate-300';
+      if (v < 18) return 'text-yellow-600 dark:text-yellow-400';
+      if (v < 22) return 'text-orange-600 dark:text-orange-400';
+      return 'text-red-600 dark:text-red-400';
+    },
+    regimePillCls() {
+      const r = this.d?.context?.regime?.name;
+      const map = { 'VERY_LOW':'bg-blue-100 text-blue-700','LOW':'bg-green-100 text-green-700','ELEVATED':'bg-yellow-100 text-yellow-700','HIGH':'bg-orange-100 text-orange-700','EXTREME':'bg-red-100 text-red-700' };
+      return map[r] || 'bg-slate-100 text-slate-600';
+    },
+    verdictBg() {
+      const c = this.d?.verdict?.color || 'slate';
+      const map = {
+        'emerald':'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-900 dark:text-emerald-100',
+        'green':'bg-green-100 dark:bg-green-900/30 text-green-900 dark:text-green-100',
+        'blue':'bg-blue-100 dark:bg-blue-900/30 text-blue-900 dark:text-blue-100',
+        'yellow':'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-900 dark:text-yellow-100',
+        'amber':'bg-amber-100 dark:bg-amber-900/30 text-amber-900 dark:text-amber-100',
+        'orange':'bg-orange-100 dark:bg-orange-900/30 text-orange-900 dark:text-orange-100',
+        'red':'bg-red-100 dark:bg-red-900/30 text-red-900 dark:text-red-100',
+        'purple':'bg-purple-100 dark:bg-purple-900/30 text-purple-900 dark:text-purple-100',
+        'slate':'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300'
+      };
+      return map[c] || map.slate;
+    },
+    tierBorder(id) {
+      return { 'low':'border-emerald-300 dark:border-emerald-700',
+               'mid':'border-yellow-300 dark:border-yellow-700',
+               'high':'border-orange-300 dark:border-orange-700' }[id] || 'border-slate-200 dark:border-slate-700';
+    },
+    tierHeaderBg(id) {
+      return { 'low':'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-900 dark:text-emerald-100',
+               'mid':'bg-yellow-50 dark:bg-yellow-900/20 text-yellow-900 dark:text-yellow-100',
+               'high':'bg-orange-50 dark:bg-orange-900/20 text-orange-900 dark:text-orange-100' }[id] || 'bg-slate-50 dark:bg-slate-800';
+    },
+    statusBadge(s) {
+      return { 'IDEAL':'bg-emerald-200 text-emerald-900 dark:bg-emerald-800 dark:text-emerald-100',
+               'MIN_MET':'bg-yellow-200 text-yellow-900 dark:bg-yellow-800 dark:text-yellow-100',
+               'CLOSE':'bg-orange-200 text-orange-900 dark:bg-orange-800 dark:text-orange-100',
+               'BELOW':'bg-red-200 text-red-900 dark:bg-red-800 dark:text-red-100' }[s] || 'bg-slate-200 text-slate-700';
+    },
+    cushColor(c) {
+      if (c >= 3) return 'text-emerald-600 font-bold';
+      if (c >= 2) return 'text-green-600';
+      if (c >= 1.5) return 'text-yellow-600';
+      if (c >= 1) return 'text-orange-600';
+      return 'text-red-600';
+    },
+    perCrColor(v) {
+      if (!v) return 'text-slate-400';
+      if (v >= 10000) return 'text-emerald-600 dark:text-emerald-400';
+      if (v >= 5000)  return 'text-green-600 dark:text-green-400';
+      if (v >= 3000)  return 'text-yellow-600 dark:text-yellow-400';
+      return 'text-red-600 dark:text-red-400';
+    },
+    perCrBarCls(v) {
+      if (!v) return 'bg-slate-300';
+      if (v >= 10000) return 'bg-emerald-500';
+      if (v >= 5000)  return 'bg-green-500';
+      if (v >= 3000)  return 'bg-yellow-500';
+      return 'bg-red-500';
+    },
+    formatOI(oi) {
+      if (!oi) return '-';
+      if (oi >= 1e7) return (oi/1e7).toFixed(1) + 'Cr';
+      if (oi >= 1e5) return (oi/1e5).toFixed(1) + 'L';
+      if (oi >= 1e3) return (oi/1e3).toFixed(0) + 'K';
+      return oi;
+    },
+    formatINR(v) {
+      if (!v) return '0';
+      if (Math.abs(v) >= 1e7) return (v/1e7).toFixed(2) + 'Cr';
+      if (Math.abs(v) >= 1e5) return (v/1e5).toFixed(2) + 'L';
+      if (Math.abs(v) >= 1e3) return (v/1e3).toFixed(0) + 'K';
+      return Math.round(v);
+    },
+    pivotLevels() {
+      const p = this.d?.context?.pivots; if (!p) return [];
+      const spot = this.d?.context?.spot ?? 0;
+      const lvls = [
+        {label:'R3',value:p.r3,cls:'bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-200'},
+        {label:'R2',value:p.r2,cls:'bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300'},
+        {label:'R1',value:p.r1,cls:'bg-red-50/50 dark:bg-red-900/10 text-red-600 dark:text-red-400'},
+        {label:'PIV',value:p.pivot,cls:'bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-200 font-bold'},
+        {label:'S1',value:p.s1,cls:'bg-green-50/50 dark:bg-green-900/10 text-green-600 dark:text-green-400'},
+        {label:'S2',value:p.s2,cls:'bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-300'},
+        {label:'S3',value:p.s3,cls:'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-200'},
+      ];
+      return lvls.map(l => ({...l, dist: ((l.value - spot)/spot*100).toFixed(2)+'%'}));
+    },
+    ladderSvg() {
+      const ctx = this.d?.context; const tiers = this.d?.tiers || [];
+      if (!ctx) return '';
+      const spot = ctx.spot;
+      const em = ctx.expected_move_pts;
+      const allStrikes = [];
+      tiers.forEach(t => { allStrikes.push(t.ce.strike); allStrikes.push(t.pe.strike); });
+      (ctx.ce_walls||[]).forEach(w => allStrikes.push(w.strike));
+      (ctx.pe_walls||[]).forEach(w => allStrikes.push(w.strike));
+      allStrikes.push(ctx.max_pain, spot, spot+em, spot-em);
+      const yMin = Math.min(...allStrikes) * 0.998;
+      const yMax = Math.max(...allStrikes) * 1.002;
+      const yScale = (v) => 288 - (((v - yMin) / (yMax - yMin)) * 268) - 10;
+      let svg = '';
+      // Background 1σ band
+      const sigmaY1 = yScale(spot+em); const sigmaY2 = yScale(spot-em);
+      svg += `<rect x="0" y="${sigmaY1}" width="800" height="${sigmaY2-sigmaY1}" fill="#8b5cf6" opacity="0.06"/>`;
+      svg += `<text x="788" y="${sigmaY1+12}" text-anchor="end" font-size="10" fill="#8b5cf6">+1σ ${Math.round(spot+em)}</text>`;
+      svg += `<text x="788" y="${sigmaY2-4}" text-anchor="end" font-size="10" fill="#8b5cf6">-1σ ${Math.round(spot-em)}</text>`;
+      // CE walls (red dashed)
+      (ctx.ce_walls||[]).slice(0,3).forEach((w, i) => {
+        const y = yScale(w.strike);
+        svg += `<line x1="0" x2="800" y1="${y}" y2="${y}" stroke="#dc2626" stroke-width="${1+(3-i)*0.5}" opacity="0.4" stroke-dasharray="4,2"/>`;
+        svg += `<text x="6" y="${y-2}" font-size="10" fill="#dc2626" font-weight="bold">CE ${w.strike} · ${(w.oi/1e5).toFixed(1)}L</text>`;
+      });
+      // PE walls (green dashed)
+      (ctx.pe_walls||[]).slice(0,3).forEach((w, i) => {
+        const y = yScale(w.strike);
+        svg += `<line x1="0" x2="800" y1="${y}" y2="${y}" stroke="#16a34a" stroke-width="${1+(3-i)*0.5}" opacity="0.4" stroke-dasharray="4,2"/>`;
+        svg += `<text x="6" y="${y-2}" font-size="10" fill="#16a34a" font-weight="bold">PE ${w.strike} · ${(w.oi/1e5).toFixed(1)}L</text>`;
+      });
+      // Tier strikes
+      const tierColor = {'low':'#10b981','mid':'#eab308','high':'#f97316'};
+      tiers.forEach(t => {
+        const c = tierColor[t.id]||'#64748b';
+        [{s: t.ce.strike, side:'CE'},{s: t.pe.strike, side:'PE'}].forEach(o => {
+          const y = yScale(o.s);
+          svg += `<line x1="0" x2="800" y1="${y}" y2="${y}" stroke="${c}" stroke-width="2"/>`;
+          svg += `<text x="794" y="${y+4}" text-anchor="end" font-size="11" font-weight="bold" fill="${c}">${t.id.toUpperCase()} ${o.side} ${o.s}</text>`;
+        });
+      });
+      // Max pain
+      const yMp = yScale(ctx.max_pain);
+      svg += `<line x1="0" x2="800" y1="${yMp}" y2="${yMp}" stroke="#a855f7" stroke-width="2" stroke-dasharray="2,4"/>`;
+      svg += `<text x="400" y="${yMp-3}" text-anchor="middle" font-size="11" fill="#a855f7" font-weight="bold">MAX-PAIN ${ctx.max_pain}</text>`;
+      // Spot (bold blue)
+      const ySpot = yScale(spot);
+      svg += `<line x1="0" x2="800" y1="${ySpot}" y2="${ySpot}" stroke="#0ea5e9" stroke-width="3"/>`;
+      svg += `<rect x="376" y="${ySpot-10}" width="48" height="20" fill="#0ea5e9"/>`;
+      svg += `<text x="400" y="${ySpot+4}" text-anchor="middle" font-size="11" fill="white" font-weight="bold">${Math.round(spot)}</text>`;
+      svg += `<text x="6" y="${ySpot+4}" font-size="11" fill="#0ea5e9" font-weight="bold">SPOT</text>`;
+      return svg;
+    },
+  };
+}
+</script>
+{% endblock %}

@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en" x-data="{ dark: localStorage.getItem('theme') === 'dark' }" :class="{ 'dark': dark }">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{% block title %}ThetaDesk{% endblock %}</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+<script>
+  tailwind.config = {
+    darkMode: 'class',
+    theme: {
+      extend: {
+        fontFamily: {
+          'sans': ['Inter', 'system-ui', 'sans-serif'],
+          'mono': ['"JetBrains Mono"', '"Geist Mono"', 'monospace'],
+        },
+        colors: {
+          /* Stripe-style neutral scale */
+          ink: { 0:'#fafafa', 50:'#f5f5f5', 100:'#e5e5e5', 200:'#d4d4d4', 300:'#a3a3a3', 400:'#737373', 500:'#525252', 600:'#404040', 700:'#262626', 800:'#171717', 900:'#0a0a0a' },
+          /* Single accent for actions */
+          accent: { 50:'#eef2ff', 100:'#e0e7ff', 500:'#6366f1', 600:'#4f46e5', 700:'#4338ca' },
+          /* P&L colors - the only "decorative" colors */
+          gain: { 50:'#ecfdf5', 100:'#d1fae5', 500:'#10b981', 600:'#059669', 700:'#047857' },
+          loss: { 50:'#fef2f2', 100:'#fee2e2', 500:'#ef4444', 600:'#dc2626', 700:'#b91c1c' },
+          warn: { 50:'#fffbeb', 100:'#fef3c7', 500:'#f59e0b', 600:'#d97706' },
+        }
+      }
+    }
+  };
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  /* ============ Design system ============ */
+  :root {
+    --bg: #fafafa; --surface: #ffffff; --border: #e5e5e5;
+    --text-1: #0a0a0a; --text-2: #525252; --text-3: #a3a3a3;
+  }
+  .dark {
+    --bg: #0a0a0a; --surface: #141414; --border: #262626;
+    --text-1: #fafafa; --text-2: #a3a3a3; --text-3: #525252;
+  }
+  body { font-family: 'Inter', sans-serif; font-size: 13px; letter-spacing: -0.01em; background: var(--bg); color: var(--text-1); -webkit-font-smoothing: antialiased; }
+  .num { font-family: 'JetBrains Mono', monospace; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
+
+  /* Surfaces */
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; }
+  .card-flat { background: var(--surface); border-radius: 8px; }
+
+  /* Sidebar nav */
+  .nav-item { display: flex; align-items: center; padding: 6px 10px; border-radius: 6px; font-size: 13px; font-weight: 500; color: var(--text-2); transition: all .15s; }
+  .nav-item:hover { color: var(--text-1); background: var(--bg); }
+  .nav-item.active { background: var(--text-1); color: var(--surface); font-weight: 600; }
+
+  /* Status pill */
+  .pill { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 500; line-height: 1.4; }
+
+  /* Tabular table */
+  .data-table { width: 100%; font-size: 12px; }
+  .data-table thead th { text-align: left; font-size: 10px; font-weight: 600; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.06em; padding: 10px 12px; border-bottom: 1px solid var(--border); }
+  .data-table tbody td { padding: 10px 12px; border-bottom: 1px solid var(--border); }
+  .data-table tbody tr:last-child td { border-bottom: 0; }
+  .data-table tbody tr:hover { background: var(--bg); }
+
+  /* Pulse */
+  @keyframes pulse-soft { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+  .pulse-soft { animation: pulse-soft 2s ease-in-out infinite; }
+
+  /* Hide native number-input spinners (eat into our usable width) */
+  input[type="number"]::-webkit-inner-spin-button,
+  input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+  input[type="number"] { -moz-appearance: textfield; appearance: textfield; }
+  /* Cloak */
+  [x-cloak] { display: none !important; }
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  /* Selection */
+  ::selection { background: rgba(99,102,241,0.2); }
+</style>
+</head>
+<body class="min-h-screen">
+
+<div class="flex min-h-screen">
+  <!-- ─── SIDEBAR (200px) ─── -->
+  <aside class="hidden md:flex flex-col w-[200px] shrink-0 px-3 py-5 sticky top-0 h-screen border-r border-[var(--border)]">
+    <a href="/live" class="flex items-baseline gap-1.5 px-2 mb-7">
+      <span class="font-bold text-[15px] tracking-tight">ThetaDesk</span>
+      <span class="text-[10px] text-[var(--text-3)] font-mono">v0.2</span>
+    </a>
+
+    <nav class="space-y-0.5">
+      <a href="/report" class="nav-item {% if active_nav in ('report','live') %}active{% endif %}">Report</a>
+      <a href="/recommend/SENSEX" class="nav-item {% if active_nav == 'strategy' %}active{% endif %}">Strangle Strategy</a>
+      <a href="/manipulation/SENSEX" class="nav-item {% if active_nav == 'harvest' %}active{% endif %}">Harvest Strategy</a>
+      <a href="/chain/SENSEX" class="nav-item {% if active_nav == 'chain' %}active{% endif %}">Chain</a>
+    </nav>
+
+    <div class="my-5 border-t border-[var(--border)]"></div>
+
+    <div class="px-2 mb-2">
+      <div class="text-[10px] uppercase tracking-wider text-[var(--text-3)] font-semibold mb-1.5">Session</div>
+      <div id="kite-status" class="text-[11px] num">
+        <span class="pulse-soft inline-block w-1.5 h-1.5 rounded-full bg-[var(--text-3)] mr-1.5"></span>connecting
+      </div>
+    </div>
+
+    <nav class="space-y-0.5">
+      <a href="https://kite.zerodha.com" target="_blank" class="nav-item text-[12px]">Kite ↗</a>
+      <button @click="dark = !dark; localStorage.setItem('theme', dark ? 'dark' : 'light')" class="nav-item w-full text-left text-[12px]">
+        <span x-text="dark ? 'Light' : 'Dark'"></span>
+      </button>
+    </nav>
+
+    <div class="mt-auto pt-4 border-t border-[var(--border)] flex items-center gap-2.5 px-2">
+      <div class="w-7 h-7 rounded-full bg-[var(--text-1)] text-[var(--surface)] flex items-center justify-center text-[11px] font-bold">R</div>
+      <div class="flex-1 min-w-0">
+        <div class="text-[12px] font-semibold leading-tight">Rohan Shah</div>
+        <div class="text-[10px] text-[var(--text-3)]">Navin Group</div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ─── MAIN ─── -->
+  <main class="flex-1 min-w-0 flex flex-col">
+    <!-- Top status strip (Bloomberg-style — single line of market state) -->
+    <div id="topstrip" class="border-b border-[var(--border)] bg-[var(--surface)] px-5 py-2 num text-[11px] flex items-center gap-5 overflow-x-auto whitespace-nowrap">
+      <span class="text-[var(--text-3)]" id="ist-clock">—</span>
+      <span class="h-3 w-px bg-[var(--border)]"></span>
+      <span><span class="text-[var(--text-3)]">SENSEX</span> <span class="font-semibold" id="topstrip-sensex">—</span></span>
+      <span><span class="text-[var(--text-3)]">NIFTY</span> <span class="font-semibold" id="topstrip-nifty">—</span></span>
+      <span><span class="text-[var(--text-3)]">VIX</span> <span class="font-semibold" id="topstrip-vix">—</span></span>
+      <span class="h-3 w-px bg-[var(--border)]"></span>
+      <span><span class="text-[var(--text-3)]">Pin</span> <span id="topstrip-mp-sensex">—</span></span>
+      <span class="ml-auto" id="topstrip-extra"></span>
+    </div>
+
+    <!-- Mobile nav -->
+    <nav class="md:hidden flex gap-1 overflow-x-auto px-4 py-2 border-b border-[var(--border)] bg-[var(--surface)]">
+      <a href="/live" class="text-xs px-3 py-1 rounded-md bg-[var(--bg)] whitespace-nowrap">Live</a>
+      <a href="/recommend/SENSEX" class="text-xs px-3 py-1 rounded-md bg-[var(--bg)] whitespace-nowrap">Strategy</a>
+      <a href="/manipulation/SENSEX" class="text-xs px-3 py-1 rounded-md bg-[var(--bg)] whitespace-nowrap">Harvest</a>
+      <a href="/chain/SENSEX" class="text-xs px-3 py-1 rounded-md bg-[var(--bg)] whitespace-nowrap">Chain</a>
+    </nav>
+
+    <!-- Page content -->
+    <div class="flex-1 px-5 py-5 max-w-[1400px] w-full">
+      {% block content %}{% endblock %}
+    </div>
+  </main>
+</div>
+
+<script>
+async function checkHealth() {
+  try {
+    const r = await fetch('/api/health');
+    const j = await r.json();
+    const el = document.getElementById('kite-status');
+    if (!el) return;
+    if (j.kite_alive) {
+      el.innerHTML = `<span class="inline-block w-1.5 h-1.5 rounded-full bg-gain-500 mr-1.5"></span>Kite live`;
+    } else {
+      el.innerHTML = `<span class="pulse-soft inline-block w-1.5 h-1.5 rounded-full bg-loss-500 mr-1.5"></span>Kite expired`;
+    }
+    const clk = document.getElementById('ist-clock');
+    if (clk) clk.textContent = `${j.ist_time} IST · ${j.weekday}`;
+  } catch (e) {}
+}
+async function updateTopstrip() {
+  try {
+    const j = await (await fetch('/api/snapshot')).json();
+    const setEl = (id, text, klass) => { const el = document.getElementById(id); if (!el) return; el.textContent = text; if (klass) el.className = 'font-semibold ' + klass; };
+    if (j.SENSEX) {
+      const c = j.SENSEX.change_pct; const cls = c >= 0 ? 'text-gain-600' : 'text-loss-600';
+      const el = document.getElementById('topstrip-sensex');
+      if (el) el.innerHTML = `<span class="font-semibold">${j.SENSEX.spot}</span> <span class="${cls}">${c>=0?'+':''}${c}%</span>`;
+      const mp = document.getElementById('topstrip-mp-sensex');
+      if (mp) mp.textContent = j.SENSEX.spot ? '—' : '—';
+    }
+    if (j.NIFTY) {
+      const c = j.NIFTY.change_pct; const cls = c >= 0 ? 'text-gain-600' : 'text-loss-600';
+      const el = document.getElementById('topstrip-nifty');
+      if (el) el.innerHTML = `<span class="font-semibold">${j.NIFTY.spot}</span> <span class="${cls}">${c>=0?'+':''}${c}%</span>`;
+    }
+    if (j.vix !== undefined) {
+      const v = j.vix; let cls = 'text-[var(--text-1)]';
+      if (v >= 22) cls = 'text-loss-600'; else if (v >= 18) cls = 'text-warn-600'; else if (v >= 16) cls = 'text-warn-500';
+      const el = document.getElementById('topstrip-vix');
+      if (el) el.innerHTML = `<span class="${cls} font-semibold">${v}</span> <span class="text-[var(--text-3)]">${j.vix_change>=0?'+':''}${j.vix_change}</span>`;
+    }
+  } catch (e) {}
+}
+checkHealth(); updateTopstrip();
+setInterval(checkHealth, 30000);
+setInterval(updateTopstrip, 15000);
+</script>
+
+{% block scripts %}{% endblock %}
+</body>
+</html>
